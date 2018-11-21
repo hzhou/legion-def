@@ -1,0 +1,144 @@
+subcode: legion_frame
+    $include "legion.h"
+    $(setpage:namespace=Legion)
+
+    $call @global
+    $function main
+        Runtime::set_top_level_task_id(TOP_TASK_ID);
+        $call main
+        return Runtime::start(argc, argv)
+
+#---- Tasks ------------------------------------ 
+subcode: _autoload
+    enum TaskID {
+      DUMP_STUB enum_task_ids
+      $: NULL_TASK_ID
+    };
+
+    enum FieldID {
+      DUMP_STUB enum_field_ids
+      $: NULL_FID
+    };
+
+    $fntype void (*task)(const Task *task, const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
+
+subcode: register_task(NAME)
+    $list $(NAME)_task
+    $(block:enum_task_ids)
+        $(NAME)_TASK_ID,
+    $: {
+    TaskVariantRegistrar registrar($(NAME)_TASK_ID, "$(NAME) task")
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
+
+    $get_fn_type(type) $(NAME)_task
+    $(if:$(NAME)_attr~leaf)
+        registrar.set_leaf()
+    $(if:type=void)
+        Runtime::preregister_task_variant<$(NAME)_task>(registrar, "$(NAME) task")
+    $(else)
+        Runtime::preregister_task_variant<$(type), $(NAME)_task>(registrar, "$(NAME) task")
+    $: }
+
+#---------------------------------------- 
+subcode: launch_task_(t, NAME, @deps)
+    $my Future $(t)
+    $block
+        $(if:!arg)
+            $(set:Arg=TaskArgument(NULL, 0))
+        $(elif:arg~.*[+-])
+            $my auto a = $(arg)
+            $(set:Arg=TaskArgument(&a, sizeof(a)))
+        $(else)
+            $(set:Arg=TaskArgument(&$(arg), sizeof($(arg))))
+
+        $:: TaskLauncher T($(NAME)_TASK_ID, $(Arg));
+        $(if:deps)
+            $(for:f in $(deps))
+                T.add_future($(f))
+        $(t) = runtime->execute_task(ctx, T)
+
+subcode: launch_task_1(t, NAME, a, @deps)
+    $(set:arg=$(a))
+    $call launch_task_, $(t), $(NAME), $(deps)
+
+subcode: task_arg(a)
+    $(if:a~n_)
+        $(set:T=int)
+    $my $(T) $(a) = *(const $(T) *)task->args
+
+subcode: task_future_args(@var_list)
+    $(for:a in $(var_list))
+        $(if:a~n_)
+            $(set:T=int)
+        $my $(T) $(a) = task->futures[$(_i)].get_result<$(T)>()
+
+#---------------------------------------- 
+subcode: each_argv_i
+    $my const InputArgs &args = Runtime::get_input_args()
+    $for i=1:args.argc
+        $(set:a=args.argv[i])
+        $if $(a)[0]=='-'
+            i++
+            continue
+        BLOCK
+
+macros:
+    cur_time: runtime->get_current_time(ctx)
+    time: runtime->get_current_time(ctx, $1)
+    time_diff: $1.get_result<double>() - $2.get_result<double>()
+
+#---- Index ------------------------------------ 
+subcode: launch_tasks(NAME, N, arg)
+    $my FutureMap fm
+    $block
+        $my ArgumentMap arg_map
+        $for i=0:$(N)
+            $my auto a = $(arg)
+            arg_map.set_point(i, TaskArgument(&a, sizeof(a)))
+        $:: Rect<1> index(0, $(N)-1);
+        $(set:Arg=TaskArgument(NULL, 0))
+        $:: IndexLauncher T($(NAME)_TASK_ID, index, $(Arg), arg_map);
+        fm = runtime->execute_index_space(ctx, T)
+
+subcode: task_index_i
+    i = task->index_point.point_data[0]
+
+subcode: task_local_arg(a)
+    $(set:T=int)
+    $(if:a~f_)
+        $(set:T=float)
+    $my $(T) $(a) = *(const $(T) *)task->local_args
+
+#-==== logical regions ======================================
+subcode: create_index_space_unbounded(t, N)
+    $(set:R=Domain(DomainPoint(0), DomainPoint($(N)-1)))
+    $my IndexSpace $(t) = runtime->create_index_space(ctx, $(R))
+
+    $(block:_delete_spaces)
+        runtime->destroy_index_space(ctx, $(t))
+
+subcode: create_index_space(t, N)
+    $(set:R=Rect<1>(0, $(N)-1))
+    $my IndexSpaceT<1> $(t) = runtime->create_index_space(ctx, $(R))
+
+    $(block:_delete_spaces)
+        runtime->destroy_index_space(ctx, $(t))
+
+subcode: create_field_space(t, @fields)
+    $my FieldSpace $(t) = runtime->create_field_space(ctx)
+    $: {
+    $my FieldAllocator alloc=runtime->create_field_allocator(ctx, $(t))
+    $(for:f, T in $(fields) and $(types))
+        $(block:enum_field_ids)
+            $(f)_FID,
+        alloc.allocate_field(sizeof($(T)), $(f)_FID)
+    $: }
+
+    $(block:_delete_spaces)
+        runtime->destroy_field_space(ctx, $(t))
+
+subcode: create_logical_region(t, index_space, field_space)
+    $my LogicalRegionT<1> $(t) = runtime->create_logical_region(ctx, $(index_space), $(field_space))
+
+    $(block:_delete_regions)
+        runtime->destroy_logical_region(ctx, $(t))

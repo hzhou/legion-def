@@ -1,0 +1,35 @@
+subcode: top_task(fn, constraint)
+    Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID)
+    $call register_task, top_level_task, TOP_LEVEL_TASK_ID, LOC_PROC
+
+subcode: register_task(fn, ID, constraint)
+    $(set:key="$(ID)")
+    $my TaskVariantRegistrar registrar($(ID), $(key))
+    registrar.add_constraint(ProcessorConstraint(Processor::$(constraint)))
+    $(if:fn!=top_level_task)
+        registrar.set_leaf(true)
+
+    Runtime::preregister_task_variant<$(fn)>(registrar, $(key))
+
+#---- TaskHelper ------------------------------------ 
+subcode: task_register(task)
+    $(if:1)
+        $call register_task, $(task)_impl, $(task)_ID, LOC_PROC
+    $(if:USE_CUDA)
+        $call register_task, $(task)_impl, $(task)_ID, TOC_PROC
+
+# a launcher is a class that extends IndexLauncher
+#     it executes cpu_base_impl or gpu_base_impl over the indexspace
+subcode: task_dispatch(task)
+    $(set:T=$($(task)_T))
+    $(if:task!=upv)
+        fm = runtime->execute_index_space(ctx, $(task)_launcher)
+        $if b_success && b_perform_checks
+            b_success &&= launcher.launch_check_fields(ctx, runtime) 
+    $(else)
+        fm = runtime->execute_index_space(ctx, $(task)_launcher)
+        $if i==n_loops-1
+            fm.wait_all_results()
+        $if b_success && b_perform_checks
+            b_success &&= launcher.launch_check_fields(ctx, runtime) 
+

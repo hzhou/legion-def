@@ -1,0 +1,219 @@
+include: legion.def
+page: circuit.cc
+    module: cpp
+
+    # ---- register tasks ----
+    $call top_task, top_level_task, LOC_PROC
+    $map task_register, cnc, dsc, upv
+    CheckTask::register_task()
+
+    $call @SEQUENTIAL_LOAD_CIRCUIT
+    Runtime::register_reduction_op<AccumulateCharge>(REDUCE_ID);
+    Runtime::add_registration_callback(update_mappers);
+
+    # ---- run them ----
+    return Runtime::start(argc, argv)
+
+fncode: top_level_task(task, regions, ctx, runtime)
+    $call @parse_argument
+    $call @circuit_setup
+    $call @circuit_load
+    $call circuit_simulate
+    DUMP_STUB _clean_up
+
+class: CalcNewCurrentsTask: IndexLauncher
+    bool launch_check_fields(ctx, runtime)
+    $static const TASK_NAME, TASK_ID=CALC_NEW_CURRENT_TASK_ID, CPU_BASE_LEAF=true, GPU_BASE_LEAF=true, MAPPER_ID=0
+    # ---------------
+    constructor
+    cpu_base_impl(piece, regions, ctx, runtime)
+    gpu_base_impl(piece, regions)
+
+class: DistributeChargeTask: IndexLauncher
+class: UpdateVoltagesTask: IndexLauncher
+
+class: CheckTask: IndexLauncher
+    bool dispatch(ctx, runtime, b_success)
+    $static const TASK_NAME, TASK_ID, LEAF=true, MAPPER_ID=0
+    # ----------------
+    cpu_impl(task, regions, ctx, runtime)
+    register_task(void)
+
+class InitWiresTask: IndexLauncher
+class InitLocationTask: IndexLauncher
+
+#---------------------------------------- 
+subcode: parse_argument
+    $call get_runtime_args
+    $(for:a, b in $(arg_list) and $(arg_defaults))
+        $my $(a) = $(b)
+    $call @parse_input_args
+
+    subcode: get_runtime_args
+        $my const InputArgs& args, int argc, char** argv
+        args = Runtime::get_input_args()
+        argv = args.argv
+        argc = args.argc
+
+    subcode: parse_input_args
+        $for i=1:argc
+            $(for:opt, a in $(arg_opts) and $(arg_list))
+                $case argv[i] $Eq "$(opt)"
+                    $(if:a~n_)
+                        $(a) = atoi(argv[i])
+                        i++
+                    $(elif:a~b_)
+                        $(a) = true
+
+#---------------------------------------- 
+subcode: _autoload
+    $register_name(task) const Task *
+    $register_name(regions) const std::vector<PhysicalRegion> &
+    $register_name(ctx) Context
+    $register_name(runtime) Runtime *
+    $register_name(fm) FutureMap
+
+    $register_name(circuit) Circuit
+
+    # $global Logger log("circuit")
+    $list top_level_task
+
+    $enum $(join:*_TASK_ID:,:TOP_LEVEL,CALC_NEW_CURRENT,DISTRIBUTE_CHARGE,UPDATE_VOLTAGES,CHECK_FIELD)
+    $enum(NodeFields) $(join:FID_*:,:NODE_CAP,LEAKAGE,CHARGE,NODE_VOLTAGE,PIECE_COLOR)
+    $enum(WireFields) $(join:FID_*:,:IN_PTR,OUT_PTR,IN_LOC,OUT_LOC,INDUCTANCE,RESISTANCE,WIRE_CAP,CURRENT,WIRE_VOLTAGE=(FID_CURRENT+WIRE_SEGMENTS),LAST=(FID_WIRE_VOTAGE+WIRE_SEGMENTS-1))
+
+macros: 
+    arg_circuit: n_pieces, n_nodes_per_piece, n_wires_per_piece, n_pct_wire_in_piece, n_seed, n_steps 
+    arg_list: n_loops, $(arg_circuit), n_sync, b_perform_checks, b_dump_values
+    arg_opts: -l, -i, -p, -npp, -wpp, -pct, -s, -sync, -checks, -dump
+    arg_defaults: 2, 4, 2, 4, 95, 12345, 10000, 0, false, false
+
+#---------------------------------------- 
+subcode: circuit_setup
+    n_nodes = n_pieces * n_nodes_per_piece
+    n_wires = n_pieces * n_wires_per_piece
+    # -- similar to outer loop space --
+    $call create_index_space, node, n_nodes
+    $call create_index_space, wire, n_wires
+    # -- similar to structure fields --
+    $(for:node, wire, locator)
+        $map create_field_space, $1
+
+    $local circuit
+    # -- a region is an index X struct field
+    $call create_logical_region, circuit.all_nodes, node, node
+    $call create_logical_region, circuit.all_wires, wire, wire
+    $call create_logical_region, circuit.node_locator, node, locator
+
+    # ----------------------------------------------------
+    subcode: create_index_space(name, N)
+        $(set:V=index_space_$(name))
+        $my IndexSpace $(V)
+        $(V) = runtime->create_index_space(ctx, Rect<1>(0, $(N)-1))
+        runtime->attach_name($(V), "$(V)")
+        $(block:_clean_up)
+            runtime->destroy_index_space(ctx, $(V))
+
+    # ----------------------------------------------------
+    subcode: create_field_space(name, var)
+        $(set:V=field_space_$(name))
+        $(set:A=field_alloc_$(name))
+        $my FieldSpace $(V), FieldAllocator $(A)
+
+        $(V) = runtime->create_field_space(ctx)
+        runtime->attach_name($(V), "$(V)")
+
+        $(A) = runtime->create_field_allocator(ctx, $(V))
+        $call @alloc_$(name)_field
+
+        $(block:_clean_up)
+            runtime->destroy_field_space(ctx, $(V))
+
+        # --------------------------
+        subcode: alloc_(T, ID, name)
+            $(A).allocate_field(sizeof($(T)), $(ID));
+            runtime->attach_name($(V), $(ID), $(name));
+
+        subcode: alloc_node_field
+            $(for:NODE_CAP,LEAKAGE,CHARGE,NODE_VOLTAGE,PIECE_COLOR and float,float,float,float,Point<1>)
+                $call alloc_, $2, FID_$1, "$1"
+        subcode: alloc_wire_field
+            $(for:IN_PTR,OUT_PTR,IN_LOC,OUT_LOC,INDUCTANCE,RESISTANCE,WIRE_CAP and Point<1>, Point<1>, PointerLocation, PointerLocation, float,float,float)
+                $call alloc_, $2, FID_$1, "$1"
+            $for i=0:WIRE_SEGMENTS
+                $(set:ID=FID_CURRENT+i)
+                $my s_name[10]
+                sprintf(s_name, "current_%d", i)
+                $call alloc_, float, $(ID), s_name
+            $for i=0:WIRE_SEGMENTS-1
+                $(set:ID=FID_CURRENT+i)
+                $my s_name[15]
+                sprintf(s_name, "wire_voltage_%d", i)
+                $call alloc_, float, $(ID), s_name
+        subcode: alloc_locator_field
+            $call alloc_, PointerLocation, FID_LOCATOR, "locator"
+
+    # ----------------------------------------------------
+    subcode: create_logical_region(var, index_name, field_name)
+        $(var) = runtime->create_logical_region(ctx, index_space_$(index_name), field_space_$(field_name))
+        runtime->attach_name($(var), "$(var)")
+        $(block:_clean_up)
+            runtime->destroy_logical_region(ctx, $(var))
+
+#---------------------------------------- 
+subcode: circuit_load
+    $my std::vector<CircuitPiece> pieces(n_pieces)
+    $my Partitions parts
+    parts = load_circuit(circuit, pieces, ctx, runtime, $(arg_circuit))
+    $call @set_local_args
+    $call @set_launcher
+
+    subcode: set_local_args
+        $my const Rect<1> launch_rect(0, n_pieces-1)
+        $my ArgumentMap local_args
+        $for i=0:n_pieces
+            $my DomainPoint point(idx)
+            local_args.set_point(point, TaskArgument(&pieces[i], sizeof(CircuitPiece)))
+
+    subcode: set_launcher
+        # instantiate classes of IndexLauncher
+        $(set:launch=launch_rect, local_args)
+        $(set:circuit_wires_nodes=circuit.all_wires, circuit.all_nodes)
+        $(set:circuit_nodes_locator=circuit.all_nodes, circuit.node_locator)
+
+        $(set:arg1=parts.pvt_wires, parts.pvt_nodes, parts.shr_nodes, parts.ghost_nodes, $(circuit_wires_nodes), $(launch))
+        $(set:arg2=parts.pvt_nodes, parts.shr_nodes, parts.node_locations, $(circuit_nodes_locator), $(launch))
+        $my $(cnc_T) cnc_launcher($(arg1))
+        $my $(dsc_T) dsc_launcher($(arg1))
+        $my $(upv_T) upv_launcher($(arg2))
+
+macros:
+    cnc_T: CalcNewCurrentsTask
+    dsc_T: DistributeChargeTask
+    upv_T: UpdateVoltagesTask
+
+#---------------------------------------- 
+subcode: circuit_simulate
+    &call bench
+        b_success = true
+        $for i=0:n_loops
+            $map task_dispatch, cnc, dsc, upv
+
+        runtime->issue_execution_fence(ctx)
+
+    $if b_success
+        $print SUCCESS!
+    $else
+        $print FAILURE!
+
+    subcode: bench
+        $call get_time, start
+        BLOCK
+        $call get_time, end
+        tf_time = 1e-6*(tf_end-tf_start)
+        $print "ELAPSED TIME = %7.3f s", tf_time 
+
+        subcode: get_time(name)
+            $my Future future_$(name) = runtime->get_current_type_in_microseconds(ctx)
+            tf_$(name) = future_$(name).get_result<long long>()
+

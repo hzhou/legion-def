@@ -1,0 +1,39 @@
+include: macros/legion.def
+
+page: main.cc, legion_frame
+    module: cpp
+    run: cd out && make && ./main
+
+    $(set:worker_attr=leaf) # a bit less elegant, but will do now
+    $map register_task, TOP, worker
+
+fncode: TOP_task
+    n_points = 4
+    &call each_argv_i
+        n_points = atoi($(a))
+        assert(n_points>0)
+        break
+
+    $print Runing hello world redux for $n_points...
+
+    $call launch_tasks, worker, n_points, i+10
+    # future :: get_result() implies wait/synchronization
+    fm.wait_all_results()
+
+    b_all_passed = true
+    $for i=0:n_points
+        n_expect = 2*(i+10)
+        n_got = fm.get_result<int>(i)
+        $if n_got != n_expect
+            $print check failed for point $i: $n_got != $n_expect
+            b_all_passed=false
+
+    $if b_all_passed
+        $print All checks passed!
+
+fncode: worker_task: int
+    $call task_index_i
+    $print Hello world from task $i
+    $call task_local_arg, n
+    return n*2
+

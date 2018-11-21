@@ -1,0 +1,10 @@
+include: macros/legion.def
+
+page: main.cc, legion_frame
+    module: cpp
+    run: cd out && make && ./main
+
+    $call register_task, TOP
+
+fncode: TOP_task(api)
+    $print hello world!

@@ -1,0 +1,17 @@
+include: macros/legion.def
+
+page: main.cc, legion_frame
+    module: cpp
+    run: cd out && make && ./main
+
+    $map register_task, TOP
+
+fncode: TOP_task
+    $call create_index_space, rA, 1024
+    $(set:types=int, double)
+    $call create_field_space, cA, A, B
+    $call create_logical_region, r, rA, cA
+
+    $print "Region %d, index_space %d, field_space %d", r.get_tree_id(), rA.get_id(), cA.get_id()
+    DUMP_STUB _delete_regions
+    DUMP_STUB _delete_spaces

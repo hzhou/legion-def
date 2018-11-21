@@ -1,0 +1,28 @@
+include: macros/legion.def
+
+page: main.cc, legion_frame
+    module: cpp
+    run: cd out && make && ./main
+
+    $map register_task, TOP
+
+# Global variables and thread local variables are illegal
+# Global constants are ok
+# function pointers are discouraged
+
+fncode: TOP_task
+    $global n_global = 0
+    $global const int n_const = 4
+    $global __thread int n_thread = 0
+
+    $dump n_global, n_const, n_thread
+
+    $list foo
+    $print "The function pointer to foo %p may be different on different processors", foo
+
+    # dynamic memory with in the lifetime of task
+    $local_allocate(16) pn_buf
+
+
+fncode: foo
+    NOOP
