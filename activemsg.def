@@ -25,8 +25,128 @@ page: activemsg.cpp
     $register_name(dummy) MSGTYPE
     void dummy_short_handler(dummy)
     void dummy_medium_handler(dummy, p_data, n_len)
+
+    struct MessageRawArgs: template <MSGTYPE, MSGID, void(*short)(MSGTYPE), void(*med)(MSGTYPE,p,n), N>
     
     class IncomingShortMessage : IncomingMessage
+        int sender;
+        union {raw, typed}
+
         fncode: run_handler
             (*SHORT_HNDL_PTR)(u.typed)
+
+    class IncomingMediumMessage : IncomingMessage
+        int sender;
+        const void *msgdata;
+        size_t msglen;
+        union {raw, typed}
+
+    $struct HandlerReplyFuture 
+        GASNetHSL mutex;
+        GASNetCondVar condvar
+        bool valid;
+        T value
+
+    class ActiveMessageShortNoReply
+    class ActiveMessageMediumNoReply
+
+subcode: Realm::NodeAnnounceMessage
+    $typedef ActiveMessageMediumNoReply<NODE_ANNOUNCE_MSGID,RequestArgs, handle_request> Message
+
+#---------------------------------------- 
+subcode: USE_GASNET
+    class IncomingMessageManager
+        void add_incoming_message
+        void start_handler_threads
+        void shutdown
+        get_messages : IncomingMessage *
+        void handler_thread_loop
+    class PayloadSource
+    class ContiguousPayload : PayloadSource
+    class TwoDPayload : PayloadSource
+    class SpanPayload : PayloadSource
+
+    class OutgoingMessage
+    $struct SrcDataPool
+        size_t total_size
+        std::map<char* size_t> free_list
+        std::queue<OutgoingMessage *> pending_allocations
+        ...
+
+    $global static SrcDataPool * srcdatapool = NULL
+
+    class ActiveMessageEndpoint
+        std::queue<OutgoingMessage *> out_short_hdrs
+        std::queue<OutgoingMessage *> out_long_hdrs
+        char **lmb_w_bases
+        char **lmb_r_bases
+        int *lmb_r_counts
+        bool *lmb_w_avail
+    class EndpointManager
     
+    $(set:MAX_HANDLERS=128)
+    $global static gasnet_handlerentry_t handlers[$(MAX_HANDLERS)], static int hcount = 0
+
+    fncode: add_handler_entry(int msgid, void (*fnptr)())
+        handlers[hcount] = msgid, fnptr
+        hcount++
+
+    # ref: realm/runtime_impl.cc: RuntimeImpl::configure_from_command_line
+
+    fncode: init_endpoint
+        Realm::CommandLineParser cp;
+        ...
+        gasnet_attach(handlers, hcount, attach_size, 0)
+
+subcode: PTHREAD
+    fncode: GASNetHSL::
+    fncode: GASNetHSL::~
+    fncode: GASNetHSL::lock
+    fncode: GASNetHSL::unlock
+
+    fncode: GASNetCondVar::
+    fncode: GASNetCondVar::~
+    fncode: GASNetCondVar::signal
+    fncode: GASNetCondVar::broadcast
+    fncode: GASNetCondVar::wait
+
+    # ------------------------------
+    $(set:Arg=NodeID target, int msgid, const void *args, size_t arg_size, $1 int payload_mode, void *dstptr)
+    $(set:payload_contiguous=const void *payload, size_t payload_size)
+    $(set:payload_2d=const void *payload, size_t line_size, off_t line_stride, size_t line_count)
+    $(set:payload_span=const SpanList& spans, size_t payload_size)
+    fncode: enqueue_message($(Arg:$(payload_contiguous)))
+    fncode: enqueue_message($(Arg:$(payload_2d)))
+    fncode: enqueue_message($(Arg:$(payload_span)))
+
+    fncode: do_some_polling
+        # push_messages : send AM if any
+        # gasnet_AMPoll : run handler if received any AM
+    fncode: get_lmb_size
+    fncode: record_message
+    fncode: send_srcptr_release
+        # gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, srcptr, (srcptr>>32))
+    fncode: get_message_source
+
+    fncode: enqueue_incoming(sender_id, IncomingMessage * msg)
+        # incoming_message_manager->add_incoming_message(sender, msg)
+    fncode: adjust_long_msgsize(ptr, size, msgid, int chunks)
+        # split long msg in chunks
+    fncode: handle_long_msgptr(source, ptr)
+
+    fncode: add_handler_entry
+    fncode: init_endpoints
+
+    fncode: start_polling_threads(int count)
+        polling_threads.resize(count)
+        $for i=0:count
+            polling_threads[i] = Realm::Thread::create_kernel_thread<EndpointManager, &EndpointManager::polling_worker_loop>(this, Realm::ThreadLaunchParameters(), *core_rsrv)
+
+    fncode: start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stack_size)
+        incoming_message_manager = new IncomingMessageManager(gasnet_nodes(), crs)
+        incoming_message_manager->start_handler_threads(count, stack_size)
+
+    fncode: stop_activemsg_threads
+        endpoint_manager->stop_threads()
+        incoming_message_manager->shutdown()
+        delete incoming_message_manager
