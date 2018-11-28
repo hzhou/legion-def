@@ -10,12 +10,12 @@ subcode: legion_frame
 
 #---- Tasks ------------------------------------ 
 subcode: _autoload
-    enum TaskID {
+    enum Task_ID {
       DUMP_STUB enum_task_ids
       $: NULL_TASK_ID
     };
 
-    enum FieldID {
+    enum Field_ID {
       DUMP_STUB enum_field_ids
       $: NULL_FID
     };
@@ -40,38 +40,6 @@ subcode: register_task(NAME)
     $: }
 
 #---------------------------------------- 
-subcode: launch_task_(t, NAME, @deps)
-    $my Future $(t)
-    $block
-        $(if:!arg)
-            $(set:Arg=TaskArgument(NULL, 0))
-        $(elif:arg~.*[+-])
-            $my auto a = $(arg)
-            $(set:Arg=TaskArgument(&a, sizeof(a)))
-        $(else)
-            $(set:Arg=TaskArgument(&$(arg), sizeof($(arg))))
-
-        $:: TaskLauncher T($(NAME)_TASK_ID, $(Arg));
-        $(if:deps)
-            $(for:f in $(deps))
-                T.add_future($(f))
-        $(t) = runtime->execute_task(ctx, T)
-
-subcode: launch_task_1(t, NAME, a, @deps)
-    $(set:arg=$(a))
-    $call launch_task_, $(t), $(NAME), $(deps)
-
-subcode: task_arg(a)
-    $(if:a~n_)
-        $(set:T=int)
-    $my $(T) $(a) = *(const $(T) *)task->args
-
-subcode: task_future_args(@var_list)
-    $(for:a in $(var_list))
-        $(if:a~n_)
-            $(set:T=int)
-        $my $(T) $(a) = task->futures[$(_i)].get_result<$(T)>()
-
 #---------------------------------------- 
 subcode: each_argv_i
     $my const InputArgs &args = Runtime::get_input_args()
@@ -87,7 +55,19 @@ macros:
     time: runtime->get_current_time(ctx, $1)
     time_diff: $1.get_result<double>() - $2.get_result<double>()
 
-#---- Index ------------------------------------ 
+#---- launch task with BLOCK --------
+subcode: launch_task(t, NAME, @deps)
+    &call launch_task_, $(t), $(NAME)
+        NOOP
+
+subcode: launch_task_(t, NAME)
+    &call launch_task_frame, SINGLE
+        BLOCK
+
+    subcode: add_future(fut)
+        T.add_future($(fut))
+
+#---- IndexLauncher --------------- 
 subcode: launch_tasks(NAME, N, arg)
     $my FutureMap fm
     $block
@@ -100,19 +80,154 @@ subcode: launch_tasks(NAME, N, arg)
         $:: IndexLauncher T($(NAME)_TASK_ID, index, $(Arg), arg_map);
         fm = runtime->execute_index_space(ctx, T)
 
-subcode: task_index_i
-    i = task->index_point.point_data[0]
+subcode: launch_tasks_(t, NAME, index_space)
+    &call launch_task_frame, INDEX
+        BLOCK
 
-subcode: task_local_arg(a)
-    $(set:T=int)
-    $(if:a~f_)
-        $(set:T=float)
-    $my $(T) $(a) = *(const $(T) *)task->local_args
+#---------------------------------------- 
+subcode: launch_task_frame(launch_type)
+    $(if:launch_type=SINGLE)
+        $(set:Future=Future)
+        $(set:Exec=execute_task)
+        $(set:T=TaskLauncher)
+    $(else) # INDEX
+        $(set:Future=FutureMap)
+        $(set:Exec=execute_index_space)
+        $(set:T=IndexLauncher)
+    # ------------------------
+    $call @future_var
+    $: {
+        $call @set_Arg
+        $(if:launch_type=SINGLE)
+            $:: $(T) T($(NAME)_TASK_ID, $(Arg));
+        $(else) # INDEX
+            $my ArgumentMap arg_map
+            $call @set_arg_map
+            $:: $(T) T($(NAME)_TASK_ID, $(index_space), $(Arg), arg_map);
+
+        $(setmacro:_region_idx=0)
+        BLOCK
+        $call @execute
+    $: }
+    # ------------------
+    subcode: future_var
+        $(if:t!=-)
+            $my $(Future) $(t)
+    subcode: execute
+        $(if:t=-)
+            runtime->$(Exec)(ctx, T)
+        $(else)
+            $(t) = runtime->$(Exec)(ctx, T)
+    # ------------------
+    subcode: set_Arg
+        $(if:!arg)
+            $(set-1:Arg=TaskArgument(NULL, 0))
+        $(elif:arg~.*[+-])
+            $my auto a = $(arg)
+            $(set-1:Arg=TaskArgument(&a, sizeof(a)))
+        $(else)
+            $(set-1:Arg=TaskArgument(&$(arg), sizeof($(arg))))
+
+    subcode: region_require(R, PRIV, @fields)
+        $(if:!ACCESS)
+            $(set:ACCESS=EXCLUSIVE)
+        $(if:launch_type=INDEX)
+            # $(set:projection_id=0)
+            $(set:R_proj=$(R),0)
+            $call get_R_root, $(R)
+        $(else) # SINGLE
+            $(set:R_proj=$(R))
+            $(set:R_root=$(R))
+
+        T.add_region_requirement( RegionRequirement($(R_proj), $(PRIV), $(ACCESS), $(R_root)))
+        $(if:fields)
+            $(for:f in $(fields))
+                T.add_field($(_region_idx), $(f)_FID)
+                $(setmacro:_T_$(NAME)_$(f)_priv=$(PRIV))
+                $(setmacro:_T_$(NAME)_$(f)_rid=$(_region_idx))
+                # T.region_requirements[$(_region_idx)].add_field(...)
+        $(setmacro:_region_idx+=1)
+
+        perlcode: get_R_root
+            $if $param=~/(.*)_(part|ghost)/
+                MyDef::compileutil::set_current_macro("R_root", $1)
+            $else
+                MyDef::compileutil::set_current_macro("R_root", $param)
+
+#---- task functions ------------------------------------ 
+subcode: task_(NAME)
+    BLOCK
+    subcode: with_fields(@fields)
+        $(for:f in $(fields))
+            $(if:f~:)
+                $(set:f=$(f:1:))
+                $(set:fid=fid)
+            $(else)
+                $(set:fid=$(f)_FID)
+            # ----
+            $(set:rid=$(_T_$(NAME)_$(f)_rid))
+            $(set:phys_R=regions[$(rid)])
+            $(set:logi_R=task->regions[$(rid)].region)
+            # -------
+            $(if:fid=fid)
+                $(set:fids=task->regions[$(rid)].privilege_fields)
+                $:: FieldID $(fid) = *($(fids).begin());
+            $(set:temp=$(_T_$(NAME)_$(f)_priv),$($(f)_type),1)
+            $my const FieldAccessor<$(temp)> acc_$(f)($(phys_R), $(fid))
+            # -------
+            $(export:logi_R)
+        BLOCK
+
+    subcode: with_rect
+        $(set:index_space=$(logi_R).get_index_space())
+        $(set:rect=runtime->get_index_space_domain(ctx, $(index_space)))
+        $:: Rect<1> rect = $(rect);
+        $(set:i1=rect.lo[0])
+        $(set:i2=rect.hi[0])
+        BLOCK
+
+        subcode: each_row
+            $for PointInRectIterator<1> it(rect); it(); it++
+                $(set:F=acc_$1[*it])
+                BLOCK
+
+    subcode: each_row
+        $(set:index_space=$(logi_R).get_index_space())
+        $(set:rect=runtime->get_index_space_domain(ctx, $(index_space)))
+        $for PointInRectIterator<1> it($(rect)); it(); it++
+            $(set:F=acc_$1[*it])
+            BLOCK
+
+    macros:
+        i_task: task->index_point.point_data[0]
+
+    # ------------------------
+    subcode: args(@var_list)
+        $(for:a in $(var_list))
+            $call perl_set_arg_a_T, $(a)
+            $my $(T) $(a) = ((const $(T) *)task->args)[$(_i)]
+
+    subcode: local_args(@var_list)
+        $(for:a in $(var_list))
+            $call perl_set_arg_a_T, $(a)
+            $my $(T) $(a) = ((const $(T) *)task->local_args)[$(_i)]
+
+    subcode: future_args(@var_list)
+        $(for:a in $(var_list))
+            $call perl_set_arg_a_T, $(a)
+            $my $(T) $(a) = task->futures[$(_i)].get_result<$(T)>()
+
+    perlcode: perl_set_arg_a_T
+        my $var = MyDef::output_c::parse_var($param)
+        MyDef::compileutil::set_current_macro("T", $var->{type})
+        MyDef::compileutil::set_current_macro("a", $var->{name})
+
 
 #-==== logical regions ======================================
 subcode: create_index_space_unbounded(t, N)
     $(set:R=Domain(DomainPoint(0), DomainPoint($(N)-1)))
     $my IndexSpace $(t) = runtime->create_index_space(ctx, $(R))
+    $call attach_name, $(t)
 
     $(block:_delete_spaces)
         runtime->destroy_index_space(ctx, $(t))
@@ -120,18 +235,25 @@ subcode: create_index_space_unbounded(t, N)
 subcode: create_index_space(t, N)
     $(set:R=Rect<1>(0, $(N)-1))
     $my IndexSpaceT<1> $(t) = runtime->create_index_space(ctx, $(R))
+    $call attach_name, $(t)
 
     $(block:_delete_spaces)
         runtime->destroy_index_space(ctx, $(t))
 
 subcode: create_field_space(t, @fields)
     $my FieldSpace $(t) = runtime->create_field_space(ctx)
+    $call attach_name, $(t)
     $: {
     $my FieldAllocator alloc=runtime->create_field_allocator(ctx, $(t))
-    $(for:f, T in $(fields) and $(types))
+    $(for:f in $(fields))
         $(block:enum_field_ids)
             $(f)_FID,
+        $(if:$(f)_type)
+            $(set:T=$($(f)_type))
+        $(else)
+            $(set:T=int)
         alloc.allocate_field(sizeof($(T)), $(f)_FID)
+        $call attach_field_name, $(t), $(f)
     $: }
 
     $(block:_delete_spaces)
@@ -139,6 +261,170 @@ subcode: create_field_space(t, @fields)
 
 subcode: create_logical_region(t, index_space, field_space)
     $my LogicalRegionT<1> $(t) = runtime->create_logical_region(ctx, $(index_space), $(field_space))
+    $call attach_name, $(t)
 
     $(block:_delete_regions)
         runtime->destroy_logical_region(ctx, $(t))
+
+#---- partitions -----------------------
+subcode: create_partition(index_space, N, @regions)
+    $call create_index_space, $(index_space)_part, $(N)
+    $my IndexPartition ip = runtime->create_equal_partition(ctx, $(index_space), $(index_space)_part)
+    $call attach_name, ip
+    $(for:R in $(regions))
+        $my LogicalPartition $(R)_part = runtime->get_logical_partition(ctx, $(R), ip)
+        $call attach_name, $(R)_part
+
+subcode: create_partition_with_ghost(index_space, N, @regions)
+    $call create_partition, $(index_space), $(N), $(regions)
+
+    n_block_size=(n_elements+n_subregions-1)/n_subregions
+    $my Transform<1,1> transform
+    transform[0][0] = n_block_size
+    $my Rect<1> extent(-2, n_block_size+1)
+    $my IndexPartition ip_ghost = runtime->create_partition_by_restriction(ctx, $(index_space), $(index_space)_part, transform, extent)
+    $(for:R in $(regions))
+        $my LogicalPartition $(R)_ghost = runtime->get_logical_partition(ctx, $(R), ip_ghost)
+
+#----
+subcode: attach_name(var)
+    runtime->attach_name($(var), "$(var)")
+
+subcode: attach_field_name(fs, f)
+    runtime->attach_name($(fs), $(f)_FID, "$(f)")
+
+#---- physical region: inline mapping ----------------
+subcode: get_physical_region(R, PRIV, @fields)
+    # last arg is region with privilege
+    $(export:$(R)_field_list=$(fields))
+    $(export:$(R)_privilege=$(PRIV))
+
+    $my RegionRequirement req_$(R)($(R), $(PRIV), EXCLUSIVE, $(R))
+    $(for:f in $(fields))
+        req_$(R).add_field($(f)_FID)
+    $my InlineLauncher il_$(R)(req_$(R))
+
+    # il_$(R).wait_until_valid()
+    $my PhysicalRegion phys_$(R) = runtime->map_region(ctx, il_$(R))
+
+subcode: with_region(R, @privilege_flag)
+    $(if:privilege_flag)
+        runtime->unmap_region(ctx, phys_$(R))
+        $(set:PRIV=$(privilege_flag))
+        il_$(R).requirement.privilege = $(PRIV)
+        $:: phys_$(R) = runtime->map_region(ctx, il_$(R));
+    $(else)
+        $(set:PRIV=$($(R)_privilege))
+
+    $: {
+    $(for:f in $($(R)_field_list))
+        $(if:$(f)_type)
+            $(set:T=$($(f)_type))
+        $(else)
+            $(set:T=int)
+        $my const FieldAccessor<$(PRIV),$(T),1> acc_$(f)(phys_$(R), $(f)_FID)
+
+    BLOCK
+    $: }
+
+    subcode: each_row
+        $(set:index_space=$(R).get_index_space())
+        $(set:rect=runtime->get_index_space_domain(ctx, $(index_space)))
+        $for PointInRectIterator<1> it($(rect)); it(); it++
+            $(set:F=acc_$1[*it])
+            BLOCK
+
+#---- Mapper ------------------------------------
+subcode: _autoload
+    $fntype void (*mapper)(Machine machine, Runtime *rt, Processor proc)
+    $fntype void (*mapper_register)(Machine machine, Runtime *rt, const std::set<Processor> &proc_set)
+
+    $(set:ctx=const MapperContext ctx)
+    $(set:task=const Task &task)
+
+    $(set:options=TaskOptions& options)
+    $fntype void (*mapper_options)($(ctx),$(task),$(options))
+
+    $(set:in=const SliceTaskInput& input)
+    $(set:out=SliceTaskOutput& output)
+    $fntype void (*mapper_slice)($(ctx),$(task),$(in),$(out))
+
+    $(set:in=const MapTaskInput& input)
+    $(set:out=MapTaskOutput& output)
+    $fntype void (*mapper_task)($(ctx),$(task),$(in),$(out))
+
+    $(set:in=const TaskProfilingInfo& input)
+    $fntype void (*mapper_profiling)($(ctx),$(task),$(in))
+
+    $(set:in=const SelectTunableInput& input)
+    $(set:out=SelectTunableOutput& output)
+    $fntype void (*mapper_tunable)($(ctx),$(task),$(in),$(out))
+
+subcode: mapper_class(name, parent, @methods)
+    $:: class $(name) : public $(parent) {
+    $: public:
+        DUMP_STUB $(name)_interface
+    };
+
+#---------------------------------------- 
+macros:
+    PART_MAPPER_ID: 1
+    PART_TUNER_ID: 1
+
+subcode: set_mapper(default_mapper, partition_mapper)
+    &call stl_iter, proc_set
+        rt->replace_default_mapper(new $(default_mapper)(machine, rt, *it), *it);
+        rt->add_mapper($(PART_MAPPER_ID), new $(partition_mapper)(machine, rt, *it), *it);
+
+subcode: get_partition_count(var)
+    $(var) = runtime->select_tunable_value(ctx, $(PART_TUNER_ID), $(PART_MAPPER_ID)).get_result<size_t>();
+
+#---------------------------------------- 
+subcode: get_all_procs
+    $my std::set<Processor> all_procs
+    machine.get_all_processors(all_procs)
+    BLOCK
+
+    subcode: if_first_proc
+        $(set:first_proc=all_procs.begin()->id+1)
+        $if local_proc.id==$(first_proc)
+            BLOCK
+
+    subcode: dump_all_procs
+        $print "There are %d processors:", all_procs.size()
+        &call stl_iter all_procs
+            $my Processor::Kind kind = it->kind()
+            $(for:LOC,TOC,IO,UTIL and CPU, GPU, I/O Proc, utility)
+                $case kind == Processor::$1_PROC
+                    $print "Processor %d is $2", it->id
+            $else
+                $call die, "Invalid processor"
+
+    
+subcode: get_all_mems
+    $my std::set<Memory> all_mems
+    machine.get_all_memories(all_mems)
+    BLOCK
+
+    subcode: dump_all_mems
+        $print "There are %d memories:", all_mems.size()
+        &call stl_iter all_mems
+            $my Memory::Kind kind = it->kind()
+            $(for:GLOBAL,SYSTEM,REGDMA,SOCKET,Z_COPY,GPU_FB,DISK,HDF,FILE)
+                $case kind == Memory::$1_MEM
+                    $print "    Memory $1 (%d): %d KB", it->id, it->capacity()>>10
+            $(for:LEVEL3,LEVEL2,LEVEL1)
+                $case kind == Memory::$1_CACHE
+                    $print "    $1 Cache (%d): %d KB", it->id, it->capacity()>>10
+    
+subcode: get_vis_mems
+    $my std::set<Memory> vis_mems
+    machine.get_visible_memories(local_proc, vis_mems)
+    BLOCK
+
+    subcode: dump_vis_mems
+        $print "There are %d memories visible from processor %d", vis_mems.size(), local_proc.id
+        &call stl_iter vis_mems
+            $my std::vector<ProcessorMemoryAffinity> affinities
+            $: int results = machine.get_proc_mem_affinity(affinities, local_proc, *it);
+            $print "  Memory %d has bandwidth %d and latency %d", it->id, affinities[0].bandwidth, affinities[0].latency

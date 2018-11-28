@@ -1,0 +1,56 @@
+include: macros/legion.def
+
+page: main.cc, legion_frame
+    module: cpp
+    run: cd out && make && ./main
+
+    $map register_task, TOP
+
+macros:
+    X_type: double
+    Y_type: double
+    Z_type: double
+
+fncode: TOP_task
+    n_elements = 1024
+    $call create_index_space, iA, n_elements
+
+    $call create_field_space, fA, X, Y
+    $call create_field_space, fB, Z
+
+    $call create_logical_region, rA, iA, fA
+    $call create_logical_region, rB, iA, fB
+
+    $call get_physical_region, rA, READ_WRITE, X, Y
+    $call get_physical_region, rB, WRITE_DISCARD, Z
+    $call @daxpy
+
+    DUMP_STUB _delete_regions
+    DUMP_STUB _delete_spaces
+
+    subcode: daxpy
+        $my const double alpha = drand48()
+        # TODO: separate delcaration and construtor for accessors
+        &call with_region, rA
+            &call each_row
+                $(F:X) = drand48()
+                $(F:Y) = drand48()
+
+            &call with_region, rB
+                &call each_row
+                    $(F:Z) = alpha * $(F:X) + $(F:Y)
+            $print "Done!"
+
+            $print Checking results...-
+            b_all_passed = true
+            &call with_region, rB, READ_ONLY
+                &call each_row
+                    $my double f_expected = alpha * $(F:X) + $(F:Y)
+                    $my double f_received = $(F:Z)
+                    $if f_expected != f_received
+                        b_all_passed = false
+            $if b_all_passed
+                $print SUCCESS!
+            $else
+                $print FAILURE!
+                        

@@ -1,0 +1,32 @@
+page: activemsg.cpp
+    module: cpp
+
+    enum ActiveMessageIDs {
+        FIRST_AVAILABLE = 140,
+        DUMP_STUB _activemsg_IDs
+        $: NULL_MSGID
+    };
+    enum Payload_IDs { $(join:PAYLOAD_*:,:NONE,KEEP,FREE,COPY,SRCPTR,PENDING,KEEPREG,EMPTY) };
+
+    # $typedef(SpanListEntry) std::pair<const void *, size_t>
+    # $typedef(SpanList) std::vector<SpanListEntry>
+
+    class GASNetHSL;
+    class GASNetCondVar;
+
+    $register_name(message_id) handlerarg_t
+    $register_name(message_chunks) handlerarg_t
+    $struct(BaseMedium) void* srcptr, message_id, message_chunks
+    $struct(BaseReply)  void* srcptr
+
+    class ActiveMsgProfilingHelper;
+    class IncomingMessage { next_msg }
+
+    $register_name(dummy) MSGTYPE
+    void dummy_short_handler(dummy)
+    void dummy_medium_handler(dummy, p_data, n_len)
+    
+    class IncomingShortMessage : IncomingMessage
+        fncode: run_handler
+            (*SHORT_HNDL_PTR)(u.typed)
+    

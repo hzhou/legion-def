@@ -1,0 +1,86 @@
+include: macros/legion.def
+
+page: main.cc, legion_frame
+    module: cpp
+    run: cd out && make && ./main
+
+    $map register_task, TOP, INIT, DAXPY, CHECK
+
+macros:
+    X_type: double
+    Y_type: double
+    Z_type: double
+
+fncode: TOP_task
+    n_elements = 1024
+    $print Running daxpy for $n_elements elements...
+
+    $call create_index_space, iA, n_elements
+
+    $call create_field_space, fA, X, Y
+    $call create_field_space, fB, Z
+
+    $call create_logical_region, rA, iA, fA
+    $call create_logical_region, rB, iA, fB
+
+    # $call get_physical_region, rA, READ_WRITE, X, Y
+    # $call get_physical_region, rB, WRITE_DISCARD, Z
+    $call @daxpy
+
+    DUMP_STUB _delete_regions
+    DUMP_STUB _delete_spaces
+
+    subcode: daxpy
+        &call launch_task_, -, INIT
+            $call region_require, rA, WRITE_DISCARD, EXCLUSIVE, X
+        &call launch_task_, -, INIT
+            $call region_require, rA, WRITE_DISCARD, EXCLUSIVE, Y
+
+        $(if:1)
+            $my const double alpha = drand48()
+        $(else)
+            $my const double alpha = 1
+
+        $(set:arg=alpha)
+        &call launch_task_, -, DAXPY
+            $call region_require, rA, READ_ONLY, EXCLUSIVE, X, Y
+            $call region_require, rB, WRITE_DISCARD, EXCLUSIVE, Z
+
+        &call launch_task_, -, CHECK
+            $call region_require, rA, READ_ONLY, EXCLUSIVE, X, Y
+            $call region_require, rB, READ_ONLY, EXCLUSIVE, Z
+
+fncode: INIT_task
+    &call with_fields, 0, WRITE_DISCARD, T:double
+        &call each_row
+            $(if:1)
+                $(F:0) = drand48()
+            $(else)
+                $(F:0) = 1.0
+
+fncode: DAXPY_task
+    $call task_arg, double alpha
+    &call with_fields, 0, READ_ONLY, X, Y
+        &call with_fields, 1, WRITE_DISCARD, Z
+            &call each_row
+                $(F:Z) = alpha * $(F:X) + $(F:Y)
+
+fncode: CHECK_task
+    $call task_arg, double alpha
+    b_all_passed = true
+    &call with_fields, 0, READ_ONLY, X, Y
+        &call with_fields, 1, READ_ONLY, Z
+            &call each_row
+                f_expected = alpha * $(F:X) + $(F:Y)
+                f_got = $(F:Z)
+                $if f_expected != f_got
+                    $print mismatch: $f_expected != $f_got
+                    b_all_passed = false
+    $if b_all_passed
+        $print "All passed!"
+    $else
+        $print "Failed!"
+
+
+
+

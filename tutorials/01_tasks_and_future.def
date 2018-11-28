@@ -17,7 +17,8 @@ fncode: TOP_task
     $my Future fib_start_time = $(cur_time)
 
     $for i=0:n
-        $call launch_task_1, t, fibonacci, i
+        $(set:arg=i)
+        $call launch_task, t, fibonacci
         fib_results.push_back(t)
         fib_finish_time.push_back($(time:t))
 
@@ -41,13 +42,17 @@ fncode: fibonacci_task: int
     $elif n==1
         return 1
 
-    $call launch_task_1, t1, fibonacci, n-1
-    $call launch_task_1, t2, fibonacci, n-2
+    $(set:arg=n-1)
+    $call launch_task, t1, fibonacci
+    $(set:arg=n-2)
+    $call launch_task, t2, fibonacci
+    $(unset:arg)
+    &call launch_task_, t, sum
+        $map add_future, t1, t2
 
-    $call launch_task_, t, sum, t1, t2
-        return t.get_result<int>()
+    return t.get_result<int>()
 
 fncode: sum_task: int
-    $call task_arg_int, a, b
+    $call task_future_args, a, b
     return a+b
 
