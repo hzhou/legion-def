@@ -2,8 +2,9 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
+    run: cd out && make -j16 && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
     # run: cd out && make && GASNET_SPAWNFN=L ./main 3 -ll:cpu 4
-    run: cd out && make && GASNET_SPAWNFN=L ./main -n 3
+    # run: cd out && make && GASNET_SPAWNFN=L ./main 2
 
     $map register_task, TOP, INIT, DAXPY, CHECK
     $call @register_mapper

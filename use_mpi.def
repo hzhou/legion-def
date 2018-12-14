@@ -1,0 +1,184 @@
+page: runtime_impl.h, from templates/runtime_impl.h
+    module: cpp
+    output_dir: ./realm_src
+
+page: runtime_impl.cc, from templates/runtime_impl.cc
+    module: cpp
+    output_dir: ./realm_src
+
+page: activemsg.h, from templates/activemsg.h
+    module: cpp
+    output_dir: ./realm_src
+
+page: activemsg.cc, from templates/activemsg.cc
+    module: cpp
+    output_dir: ./realm_src
+
+page: mem_impl.cc, from templates/mem_impl.cc
+    module: cpp
+    output_dir: ./realm_src
+
+#---------------------------------------- 
+subcode: network_init_mpi
+    MPI_Init(NULL, NULL)
+    MPI_Comm_size(MPI_COMM_WORLD, &max_node_id)
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_node_id)
+    max_node_id--
+
+subcode: init_endpoints_mpi
+    $call @parse_command_line
+    $call @init_srcdatapool
+    $call @add_handlers
+
+    subcode: add_handlers
+        assert(hcount<(MAX_HANDLERS - 3))
+        $(for:H in FLIP_REQ, FLIP_ACK, RELEASE_SRCPTR)
+            $(if:H=RELEASE_SRCPTR)
+                $(set:h=handler_$(H:lc))
+            $(else)
+                $(set:h=SrcDataPool::release_srcptr_handler)
+            handlers[hcount].index = MSGID_$(H);
+            handlers[hcount].fnptr = (void (*)())$(h);
+            hcount++
+
+#---------------------------------------- 
+template: activemsg_mpi
+    GASNetHSL::GASNetHSL(void)
+    {
+    assert(sizeof(mutex) <= sizeof(placeholder));
+    pthread_mutex_init(&mutex, 0);
+    }
+
+    GASNetHSL::~GASNetHSL(void)
+    {
+    pthread_mutex_destroy(&mutex);
+    }
+
+    void GASNetHSL::lock(void)
+    {
+    pthread_mutex_lock(&mutex);
+    }
+
+    void GASNetHSL::unlock(void)
+    {
+    pthread_mutex_unlock(&mutex);
+    }
+
+    GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
+    : mutex(_mutex)
+    {
+    assert(sizeof(condvar) <= sizeof(placeholder));
+    pthread_cond_init(&condvar, 0);
+    }
+
+    GASNetCondVar::~GASNetCondVar(void)
+    {
+    pthread_cond_destroy(&condvar);
+    }
+
+    // these require that you hold the lock when you call
+    void GASNetCondVar::signal(void)
+    {
+    pthread_cond_signal(&condvar);
+    }
+
+    void GASNetCondVar::broadcast(void)
+    {
+    pthread_cond_broadcast(&condvar);
+    }
+
+    void GASNetCondVar::wait(void)
+    {
+    pthread_cond_wait(&condvar, &mutex.mutex);
+    }
+
+    void enqueue_message(NodeID target, int msgid,
+                        const void *args, size_t arg_size,
+                        const void *payload, size_t payload_size,
+                        int payload_mode, void *dstptr)
+    {
+    assert(0 && "compiled without USE_GASNET - active messages not available!");
+    }
+
+    void enqueue_message(NodeID target, int msgid,
+                        const void *args, size_t arg_size,
+                        const void *payload, size_t line_size,
+                        off_t line_stride, size_t line_count,
+                        int payload_mode, void *dstptr)
+    {
+    assert(0 && "compiled without USE_GASNET - active messages not available!");
+    }
+
+    void enqueue_message(NodeID target, int msgid,
+                        const void *args, size_t arg_size,
+                        const SpanList& spans, size_t payload_size,
+                        int payload_mode, void *dstptr)
+    {
+    assert(0 && "compiled without USE_GASNET - active messages not available!");
+    }
+
+    void do_some_polling(void)
+    {
+    assert(0 && "compiled without USE_GASNET - active messages not available!");
+    }
+
+    size_t get_lmb_size(NodeID target_node)
+    {
+    return 0;
+    }
+
+    void record_message(NodeID source, bool sent_reply)
+    {
+    }
+
+    void send_srcptr_release(token_t token, uint64_t srcptr)
+    {
+    }
+
+    NodeID get_message_source(token_t token)
+    {
+    return 0;
+    }
+
+    void enqueue_incoming(NodeID sender, IncomingMessage *msg)
+    {
+    assert(0 && "compiled without USE_GASNET - active messages not available!");
+    }
+
+    bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
+                            int message_id, int chunks)
+    {
+    return false;
+    }
+
+    void handle_long_msgptr(NodeID source, const void *ptr)
+    {
+    assert(0 && "compiled without USE_GASNET - active messages not available!");
+    }
+
+    void add_handler_entry(int msgid, void (*fnptr)())
+    {
+    // ignored
+    }
+
+    void init_endpoints(int gasnet_mem_size_in_mb,
+                        int registered_mem_size_in_mb,
+                        int registered_ib_mem_size_in_mb,
+                        Realm::CoreReservationSet& crs,
+                        std::vector<std::string>& cmdline)
+    {
+        $call init_endpoints_mpi
+    }
+
+    void start_polling_threads(int)
+    {
+    }
+
+    void start_handler_threads(int, Realm::CoreReservationSet&, size_t)
+    {
+    }
+
+    void stop_activemsg_threads(void)
+    {
+    }
+
