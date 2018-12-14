@@ -1,0 +1,6 @@
+    * gasnetrun_ofi -n 12 out/test_gasnet
+        runs 12 processes, each with 1 thread
+
+    * GASNET_PSHM_NODES=4 gasnetrun_ofi -n 3 out/test_gasnet
+        runs 3 nodes, each_with 4 threads
+

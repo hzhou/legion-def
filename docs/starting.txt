@@ -1,0 +1,31 @@
+https://legion.stanford.edu/starting/
+
+## Makefile Variables
+
+The Legion Makefile includes several variables which influence the build. These may either be set in the environment (e.g. DEBUG=0 make) or at the top of each application’s Makefile.
+
+    * DEBUG=<0,1>: controls optimization level and enables various dynamic checks which are too expensive for release builds.
+    * OUTPUT_LEVEL=<level_name>: controls the compile-time logging level.
+    * USE_CUDA=<0,1>: enables CUDA support. If enabled, CUDA (or CUDA_TOOLKITHOME) should be set to the CUDA install location (e.g. /usr/local/cuda).
+    * USE_GASNET=<0,1>: enables GASNet support (see installation instructions). If enabled, GASNET (or GASNET_ROOT) should be set to the GASNet installation location, and CONDUIT must be set to the desired GASNet conduit (e.g. ibv, gemini, aries).
+    * USE_LLVM=<0,1>: enables LLVM support. If enabled, and an llvm-config binary is not in your path, specify its location with LLVM_CONFIG.
+    * USE_HDF=<0,1>: enables HDF5 support. If enabled, and HDF5 is not installed in the standard include/library directories, specify the install location using HDF_ROOT.
+
+## Command-Line Flags
+
+Legion and Realm accept command-line arguments for various runtime parameters. Below are some of the more commonly used flags:
+
+    * -level <category>=<int>: sets logging level for category
+    * -logfile <filename>: directs logging output to filename
+    * -ll:cpu <int>: CPU processors to create per process
+    * -ll:gpu <int>: GPU processors to create per process
+    * -ll:util <int>: utility processors to create per process
+    * -ll:csize <int>: size of CPU DRAM memory per process (in MB)
+    * -ll:gsize <int>: size of GASNet global memory available per process (in MB)
+    * -ll:rsize <int>: size of GASNet registered RDMA memory available per process (in MB)
+    * -ll:fsize <int>: size of framebuffer memory for each GPU (in MB)
+    * -ll:zsize <int>: size of zero-copy memory for each GPU (in MB)
+    * -lg:window <int>: maximum number of tasks that can be created in a parent task window
+    * -lg:sched <int>: minimum number of tasks to try to schedule for each invocation of the scheduler
+
+
