@@ -31,15 +31,14 @@ subcode: init_endpoints_mpi
     $call @add_handlers
 
     subcode: add_handlers
-        assert(hcount<(MAX_HANDLERS - 3))
+        $global const int MAX_HANDLERS=256
+        $global void (*)() am_mpi_handlers[MAX_HANDLERS] 
         $(for:H in FLIP_REQ, FLIP_ACK, RELEASE_SRCPTR)
             $(if:H=RELEASE_SRCPTR)
                 $(set:h=handler_$(H:lc))
             $(else)
                 $(set:h=SrcDataPool::release_srcptr_handler)
-            handlers[hcount].index = MSGID_$(H);
-            handlers[hcount].fnptr = (void (*)())$(h);
-            hcount++
+            am_mpi_handlers[MSGID_$(H)] = (void (*)())$(h)
 
 #---------------------------------------- 
 template: activemsg_mpi
