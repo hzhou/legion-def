@@ -45,6 +45,9 @@ static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gas
 #ifdef _INCLUDED_GASNET_TOOLS_H
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 #endif
+
+#elif defined USE_MPI
+DUMP_STUB global_init
 #endif
 
 #ifndef USE_GASNET
@@ -1079,7 +1082,7 @@ namespace Realm {
         fflush(stdout);
       }
 #endif
-#elif USE_MPI
+#elif defined USE_MPI
     $call network_init_mpi
 #endif
 

@@ -2,9 +2,8 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    run: cd out && make -j16 && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
-    # run: cd out && make && GASNET_SPAWNFN=L ./main 3 -ll:cpu 4
-    # run: cd out && make && GASNET_SPAWNFN=L ./main 2
+    # run: cd out && make -j16 && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
+    run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, INIT, DAXPY, CHECK
     $call @register_mapper
@@ -168,7 +167,7 @@ fncode: AdversarialMapper::map_task(api mapper_task)
 
     #---------------------------------------- 
     subcode: each_task_region
-        $for i=0:task.regions.size()
+        $for i=0:(int)task.regions.size()
             $(set:region=task.regions[i])
             BLOCK
 
@@ -191,7 +190,7 @@ fncode: AdversarialMapper::map_task(api mapper_task)
 
     subcode: get_premapped
         $: std::vector<bool> premapped(task.regions.size(), false);
-        $for i=0:input.premapped_regions.size()
+        $for i=0:(int)input.premapped_regions.size()
             $my unsigned index = input.premapped_regions[i]
             output.chosen_instances[index] = input.valid_instances[index]
             premapped[index] = true

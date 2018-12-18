@@ -1,0 +1,62 @@
+subcode: hsl_(cmd, which)
+    $(if:which=gasnet)
+        gasnet_hsl_$(cmd)(&mutex)
+    $(else)
+        pthread_mutex_$(cmd)(&mutex)
+
+subcode: cond_(cmd, which)
+    $(if:which=gasnet)
+        $(if:cmd=wait)
+            gasnett_cond_wait(&condvar, &mutex.mutex.lock)
+        $(else)
+            gasnett_cond_$(cmd)(&condvar)
+    $(else)
+        $(if:cmd=init)
+            pthread_cond_init(&condvar,0)
+        $(else:cmd=wait)
+            gasnett_cond_wait(&condvar, &mutex.mutex)
+        $(else)
+            pthread_cond_$(cmd)(&condvar)
+
+#---------------------------------------- 
+subcode: HSL_impl(which)
+    $(set:T=GASNetHSL)
+    &call M, $(T)(void)
+        assert(sizeof(mutex) <= sizeof(placeholder));
+        $call hsl_, init, $(which)
+
+    &call M, ~$(T)(void)
+        $call hsl_, destroy, $(which)
+
+    &call M, lock(void)
+        $call hsl_, lock, $(which)
+
+    &call M, unlock(void)
+        $call hsl_, unlock, $(which)
+
+    # ------------------------
+    $(set:T=GASNetCondVar)
+    &call M, $(T)(GASNetHSL &_mutex) : mutex(_mutex)
+        assert(sizeof(condvar) <= sizeof(placeholder));
+        $call cond_, init, $(which)
+
+    &call M, ~$(T)(void)
+        $call cond_, destroy, $(which)
+
+    #  these require that you hold the lock when you call
+    &call M, signal(void)
+        $call cond_, signal, $(which)
+
+    &call M, broadcast(void)
+        $call cond_, broadcast, $(which)
+
+    &call M, wait(void)
+        $call cond_, wait, $(which)
+
+    # -----------------
+    subcode: M(@decl)
+        $:: $(T)::$(decl)
+        $: {
+        BLOCK
+        $: }
+
