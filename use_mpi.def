@@ -23,6 +23,7 @@ page: activemsg.cc, from templates/activemsg.cc
     subcode: activemsg_decl_mpi
         #include <mpi.h>
         typedef int gasnet_node_t;
+        # typedef int token_t;
         typedef int32_t gasnet_handlerarg_t;
         $call activemsg_decl_other
     subcode: activemsg_decl_other
@@ -37,7 +38,7 @@ page: activemsg.cc, from templates/activemsg.cc
     subcode: activemsg_impl_mpi
         $(set:USE_MPI=1)
         $call HSL_impl, pthread
-        $call activemsg_impl_other
+        $template templates/activemsg_impl_gasnet.cc
     subcode: activemsg_impl_other
         $call HSL_impl, pthread
         $template templates/activemsg_impl_other.cc

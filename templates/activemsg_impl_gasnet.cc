@@ -45,7 +45,7 @@ void record_activemsg_profiling(int msgid,
 NodeID get_message_source(token_t token)
 {
   gasnet_node_t src;
-  CHECK_GASNET( gasnet_AMGetMsgSource(reinterpret_cast<gasnet_token_t>(token), &src) );
+  $call AM_token_to_src
 #ifdef DEBUG_AMREQUESTS
   printf("%d: source = %d\n", my_node_id, src);
 #endif
@@ -54,7 +54,7 @@ NodeID get_message_source(token_t token)
 
 void send_srcptr_release(token_t token, uint64_t srcptr)
 {
-  CHECK_GASNET( gasnet_AMReplyShort2(reinterpret_cast<gasnet_token_t>(token), MSGID_RELEASE_SRCPTR, (handlerarg_t)srcptr, (handlerarg_t)(srcptr >> 32)) );
+  $call AM_, ReplyShort2, MSGID_RELEASE_SRCPTR, (handlerarg_t)srcptr, (handlerarg_t)(srcptr >> 32)
 }
 
 #ifdef DEBUG_MEM_REUSE
@@ -174,7 +174,7 @@ static void handle_flip_req(gasnet_token_t token,
 		     int flip_buffer, int flip_count)
 {
   gasnet_node_t src;
-  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  $call AM_token_to_src
   endpoint_manager->handle_flip_request(src, flip_buffer, flip_count);
 }
 
@@ -182,7 +182,7 @@ static void handle_flip_ack(gasnet_token_t token,
 			    int ack_buffer)
 {
   gasnet_node_t src;
-  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  $call AM_token_to_src
   endpoint_manager->handle_flip_ack(src, ack_buffer);
 }
 
@@ -236,56 +236,7 @@ void init_endpoints(int gasnet_mem_size_in_mb,
 			   num_lmbs *
 			   lmb_size);
 
-  // add in our internal handlers and space we need for LMBs
-  size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
-			(((size_t)registered_mem_size_in_mb) << 20) +
-			(((size_t)registered_ib_mem_size_in_mb) << 20) +
-			srcdatapool_size +
-			total_lmb_size);
-
-  if(my_node_id == 0) {
-    log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, IBRMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
-		  gasnet_mem_size_in_mb, registered_mem_size_in_mb, registered_ib_mem_size_in_mb,
-		  total_lmb_size >> 20, srcdatapool_size >> 20,
-		  attach_size >> 20);
-#ifdef DEBUG_REALM_STARTUP
-    Realm::TimeStamp ts("entering gasnet_attach", false);
-    fflush(stdout);
-#endif
-  }
-
-  // Don't bother checking this here.  Some GASNet conduits lie if 
-  // the GASNET_PHYSMEM_MAX variable is not set.
-#if 0
-  if (attach_size > gasnet_getMaxLocalSegmentSize())
-  {
-    fprintf(stderr,"ERROR: Legion exceeded maximum GASNet segment size. "
-                   "Requested %ld bytes but maximum set by GASNET "
-                   "configuration is %ld bytes.  Legion will now exit...",
-                   attach_size, gasnet_getMaxLocalSegmentSize());
-    assert(false);
-  }
-#endif
-
-  assert(hcount < (MAX_HANDLERS - 3));
-  handlers[hcount].index = MSGID_FLIP_REQ;
-  handlers[hcount].fnptr = (void (*)())handle_flip_req;
-  hcount++;
-  handlers[hcount].index = MSGID_FLIP_ACK;
-  handlers[hcount].fnptr = (void (*)())handle_flip_ack;
-  hcount++;
-  handlers[hcount].index = MSGID_RELEASE_SRCPTR;
-  handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
-  hcount++;
-#ifdef ACTIVE_MESSAGE_TRACE
-  record_am_handler(MSGID_FLIP_REQ, "Flip Request AM");
-  record_am_handler(MSGID_FLIP_ACK, "Flip Acknowledgement AM");
-  record_am_handler(MSGID_RELEASE_SRCPTR, "Release Source Pointer AM");
-#endif
-
-  CHECK_GASNET( gasnet_attach(handlers, hcount,
-			      attach_size, 0) );
-
+  $call init_endpoints
 #ifdef DEBUG_REALM_STARTUP
   if(my_node_id == 0) {
     Realm::TimeStamp ts("exited gasnet_attach", false);
@@ -299,21 +250,7 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   Realm::Clock::set_zero_time();
   $call barrier
   
-  segment_info = new gasnet_seginfo_t[max_node_id+1];
-  CHECK_GASNET( gasnet_getSegmentInfo(segment_info, max_node_id+1) );
-
-  char *my_segment = (char *)(segment_info[my_node_id].addr);
-  /*char *gasnet_mem_base = my_segment;*/  my_segment += (gasnet_mem_size_in_mb << 20);
-  /*char *reg_mem_base = my_segment;*/  my_segment += (registered_mem_size_in_mb << 20);
-  /*char *reg_ib_mem_base = my_segment;*/ my_segment += (registered_ib_mem_size_in_mb << 20);
-  char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
-  /*char *lmb_base = my_segment;*/  my_segment += total_lmb_size;
-  assert(my_segment <= ((char *)(segment_info[my_node_id].addr) + segment_info[my_node_id].size)); 
-
-#ifndef NO_SRCDATAPOOL
-  if(srcdatapool_size > 0)
-    srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
-#endif
+  $call init_segments
 
   endpoint_manager = new EndpointManager(max_node_id+1, crs);
 
@@ -326,7 +263,7 @@ void do_some_polling(void)
 {
   endpoint_manager->push_messages(max_msgs_to_send);
 
-  CHECK_GASNET( gasnet_AMPoll() );
+  $call AM_poll
 }
 
 void start_polling_threads(int count)
@@ -454,22 +391,6 @@ void handle_long_msgptr(NodeID source, const void *ptr)
   assert((gasnet_node_t)source != my_node_id);
 
   endpoint_manager->handle_long_msgptr(source, ptr);
-}
-
-/*static*/ void SrcDataPool::release_srcptr_handler(gasnet_token_t token,
-						    gasnet_handlerarg_t arg0,
-						    gasnet_handlerarg_t arg1)
-{
-  uintptr_t srcptr = (((uint64_t)(uint32_t)arg1) << 32) | ((uint32_t)arg0);
-  // We may get pointers which are zero because we had to send a reply
-  // Just ignore them
-  if (srcptr != 0)
-    srcdatapool->release_srcptr((void *)srcptr);
-#ifdef TRACE_MESSAGES
-  gasnet_node_t src;
-  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
-  endpoint_manager->record_message(src, false/*sent reply*/);
-#endif
 }
 
 extern bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,

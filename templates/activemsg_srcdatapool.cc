@@ -395,3 +395,18 @@ void SrcDataPool::print_spill_data(Realm::Logger::LoggingLevel level)
 	<< " avg time=" << (total_suspended_time / total_suspended_spillers);
 }
 
+/*static*/ void SrcDataPool::release_srcptr_handler(gasnet_token_t token,
+						    gasnet_handlerarg_t arg0,
+						    gasnet_handlerarg_t arg1)
+{
+  uintptr_t srcptr = (((uint64_t)(uint32_t)arg1) << 32) | ((uint32_t)arg0);
+  // We may get pointers which are zero because we had to send a reply
+  // Just ignore them
+  if (srcptr != 0)
+    srcdatapool->release_srcptr((void *)srcptr);
+#ifdef TRACE_MESSAGES
+  gasnet_node_t src;
+  $call AM_token_to_src
+  endpoint_manager->record_message(src, false/*sent reply*/);
+#endif
+}

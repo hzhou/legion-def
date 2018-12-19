@@ -1,7 +1,46 @@
-subcode: ampoll_
+subcode: AM_poll
     $(if:USE_GASNET)
         CHECK_GASNET( gasnet_AMPoll() );
     $(elif:USE_MPI)
-        ammpi_Poll();
+        AMPoll();
 
-subcode: am_request_short
+subcode: AM_token_to_src
+    $(if:USE_GASNET)
+        CHECK_GASNET( gasnet_AMGetMsgSource(reinterpret_cast<gasnet_token_t>(token), &src) );
+    $(else)
+        src = token;
+
+subcode: AM_(FUNC, MSGID, @args)
+    $(if:USE_GASNET)
+        $(if:FUNC~Reply)
+            $(set:id=reinterpret_cast<gasnet_token_t>(token))
+        $(else)
+            $(set:id=peer)
+        CHECK_GASNET( gasnet_AM$(FUNC)($(id), $(MSGID), $(args)) );
+    $(else)
+        $(if:FUNC~Reply)
+            $(set:id=token)
+        $(else)
+            $(set:id=peer)
+        AM$(FUNC)($(id), $(MSGID), $(args));
+
+subcode: AM_get_maxes
+    $(if:USE_GASNET)
+        max_medium = gasnet_AMMaxMedium()
+        max_long = gasnet_AMMaxLongRequest()
+    $(else)
+        max_medium = SIZE_MAX
+        max_long = SIZE_MAX
+
+#---- ActiveMessageEndpoint::send_short ----
+subcode: send_short_cases
+    $(for:1-6,8,10,12,14,16)
+        $of $1
+            $if hdr->payload_mode != PAYLOAD_NONE
+                $(set:n=$1)
+                $(set:n-=1)
+                $(set:args=$(join:hdr->args[*]:, :0-$(n)))
+                $call AM_, RequestMedium$1, hdr->msgid, hdr->payload, hdr->payload_size, $(args)
+            $else
+                $call AM_, RequestShort1, hdr->msgid, $(args)
+
