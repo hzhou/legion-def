@@ -1,3 +1,7 @@
+include: macros_impl/am.def
+include: macros_impl/barrier.def
+include: macros_impl/hsl.def
+
 page: runtime_impl.h, from templates/runtime_impl.h
     module: cpp
     output_dir: ./realm_src
@@ -14,11 +18,29 @@ page: activemsg.cc, from templates/activemsg.cc
     module: cpp
     output_dir: ./realm_src
 
-    $(block:global_init)
+    subcode: activemsg_decl_gasnet
+        $template templates/activemsg_decl_gasnet.cc
+    subcode: activemsg_decl_mpi
         #include <mpi.h>
+        typedef int gasnet_node_t;
+        typedef int32_t gasnet_handlerarg_t;
+        $call activemsg_decl_other
+    subcode: activemsg_decl_other
         #include <pthread.h>
-        #define GASNETHSL_IMPL pthread_mutex_t mutex
+        #define GASNETHSL_IMPL     pthread_mutex_t mutex
         #define GASNETCONDVAR_IMPL pthread_cond_t  condvar
+    # ----------------------------
+    subcode: activemsg_impl_gasnet
+        $(set:USE_GASNET=1)
+        $call HSL_impl, gasnet
+        $template templates/activemsg_impl_gasnet.cc
+    subcode: activemsg_impl_mpi
+        $(set:USE_MPI=1)
+        $call HSL_impl, pthread
+        $call activemsg_impl_other
+    subcode: activemsg_impl_other
+        $call HSL_impl, pthread
+        $template templates/activemsg_impl_other.cc
 
 # page: mem_impl.h, from templates/mem_impl.h
 page: mem_impl.cc, from templates/mem_impl.cc
@@ -34,6 +56,36 @@ subcode: network_init_mpi
     max_node_id--
 
 #---- activemsg.cc ---------------------------- 
+subcode: class_EndpointManager
+    $template templates/activemsg_endpoint_manager.cc
+
+subcode: class_ActiveMessageEndpoint
+    $template templates/activemsg_endpoint.cc
+
+subcode: class_IncomingMessageManager
+    $template templates/activemsg_incoming_manager.cc
+subcode: impl_IncomingMessageManager
+    $template templates/activemsg_incoming_manager_impl.cc
+
+subcode: class_Payload
+    $template templates/activemsg_payload.cc
+
+subcode: class_SrcDataPool
+    $template templates/activemsg_srcdatapool.cc
+    subcode: hsl_sdp(cmd)
+        $(if:USE_GASNET)
+            gasnet_hsl_$(cmd)(&sdp.mutex);
+        $(else)
+            pthread_mutex_$(cmd)(&sdp.mutex);
+
+subcode: struct_OutgoingMessage
+    $template templates/activemsg_outgoing.cc
+subcode: impl_OutgoingMessage
+    $template templates/activemsg_outgoing_impl.cc
+
+subcode: class_DetailedMessageTiming
+    $template templates/activemsg_timing.cc
+#---------------------------------------- 
 subcode: init_endpoints_mpi
     $call @parse_command_line
     $call @init_srcdatapool
@@ -159,109 +211,7 @@ template: activemsg_mpi
     {
     }
 
-include: macros_impl/hsl.def
 #---- Common ------------------------------------ 
-template: HSL_impl_gasnet
-    GASNetHSL::GASNetHSL(void)
-    {
-    assert(sizeof(mutex) <= sizeof(placeholder));
-    gasnet_hsl_init(&mutex);
-    }
-
-    GASNetHSL::~GASNetHSL(void)
-    {
-    gasnet_hsl_destroy(&mutex);
-    }
-
-    void GASNetHSL::lock(void)
-    {
-    gasnet_hsl_lock(&mutex);
-    }
-
-    void GASNetHSL::unlock(void)
-    {
-    gasnet_hsl_unlock(&mutex);
-    }
-
-    GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
-    : mutex(_mutex)
-    {
-    assert(sizeof(condvar) <= sizeof(placeholder));
-    gasnett_cond_init(&condvar);
-    }
-
-    GASNetCondVar::~GASNetCondVar(void)
-    {
-    gasnett_cond_destroy(&condvar);
-    }
-
-    // these require that you hold the lock when you call
-    void GASNetCondVar::signal(void)
-    {
-    gasnett_cond_signal(&condvar);
-    }
-
-    void GASNetCondVar::broadcast(void)
-    {
-    gasnett_cond_broadcast(&condvar);
-    }
-
-    void GASNetCondVar::wait(void)
-    {
-    gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
-    }
-
-template: HSL_impl_pthread
-    GASNetHSL::GASNetHSL(void)
-    {
-    assert(sizeof(mutex) <= sizeof(placeholder));
-    pthread_mutex_init(&mutex, 0);
-    }
-
-    GASNetHSL::~GASNetHSL(void)
-    {
-    pthread_mutex_destroy(&mutex);
-    }
-
-    void GASNetHSL::lock(void)
-    {
-    pthread_mutex_lock(&mutex);
-    }
-
-    void GASNetHSL::unlock(void)
-    {
-    pthread_mutex_unlock(&mutex);
-    }
-
-    GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
-    : mutex(_mutex)
-    {
-    assert(sizeof(condvar) <= sizeof(placeholder));
-    pthread_cond_init(&condvar, 0);
-    }
-
-    GASNetCondVar::~GASNetCondVar(void)
-    {
-    pthread_cond_destroy(&condvar);
-    }
-
-    // these require that you hold the lock when you call
-    void GASNetCondVar::signal(void)
-    {
-    pthread_cond_signal(&condvar);
-    }
-
-    void GASNetCondVar::broadcast(void)
-    {
-    pthread_cond_broadcast(&condvar);
-    }
-
-    void GASNetCondVar::wait(void)
-    {
-    pthread_cond_wait(&condvar, &mutex.mutex);
-    }
-
-#---------------------------------------- 
 macros:
     # 64 msgid: 140-204
     msgid_list: NODE_ANNOUNCE_MSGID, SPAWN_TASK_MSGID, LOCK_REQUEST_MSGID, LOCK_RELEASE_MSGID, LOCK_GRANT_MSGID, EVENT_SUBSCRIBE_MSGID, EVENT_TRIGGER_MSGID, EVENT_UPDATE_MSGID, REMOTE_MALLOC_MSGID, REMOTE_MALLOC_RPLID, CREATE_ALLOC_MSGID, CREATE_ALLOC_RPLID, CREATE_INST_MSGID, CREATE_INST_RPLID, VALID_MASK_REQ_MSGID, VALID_MASK_DATA_MSGID, VALID_MASK_FTH_MSGID, ROLL_UP_TIMER_MSGID, ROLL_UP_DATA_MSGID, CLEAR_TIMER_MSGID, DESTROY_INST_MSGID, REMOTE_WRITE_MSGID, REMOTE_REDUCE_MSGID, REMOTE_SERDEZ_MSGID, REMOTE_WRITE_FENCE_MSGID, REMOTE_WRITE_FENCE_ACK_MSGID, DESTROY_LOCK_MSGID, REMOTE_REDLIST_MSGID, MACHINE_SHUTDOWN_MSGID, BARRIER_ADJUST_MSGID, BARRIER_SUBSCRIBE_MSGID, BARRIER_TRIGGER_MSGID, BARRIER_MIGRATE_MSGID, METADATA_REQUEST_MSGID, METADATA_RESPONSE_MSGID, METADATA_INVALIDATE_MSGID, METADATA_INVALIDATE_ACK_MSGID, XFERDES_REMOTEWRITE_MSGID, XFERDES_REMOTEWRITE_ACK_MSGID, XFERDES_CREATE_MSGID, XFERDES_DESTROY_MSGID, XFERDES_NOTIFY_COMPLETION_MSGID, XFERDES_UPDATE_BYTES_WRITE_MSGID, XFERDES_UPDATE_BYTES_READ_MSGID, REGISTER_TASK_MSGID, REGISTER_TASK_COMPLETE_MSGID, REMOTE_MICROOP_MSGID, REMOTE_MICROOP_COMPLETE_MSGID, REMOTE_SPARSITY_CONTRIB_MSGID, REMOTE_SPARSITY_REQUEST_MSGID, APPROX_IMAGE_RESPONSE_MSGID, SET_CONTRIB_COUNT_MSGID, REMOTE_ID_REQUEST_MSGID, REMOTE_ID_RESPONSE_MSGID, REMOTE_IB_ALLOC_REQUEST_MSGID, REMOTE_IB_ALLOC_RESPONSE_MSGID, REMOTE_IB_FREE_REQUEST_MSGID, REMOTE_COPY_MSGID, REMOTE_FILL_MSGID, MEM_STORAGE_ALLOC_REQ_MSGID, MEM_STORAGE_ALLOC_RESP_MSGID, MEM_STORAGE_RELEASE_REQ_MSGID, MEM_STORAGE_RELEASE_RESP_MSGID
