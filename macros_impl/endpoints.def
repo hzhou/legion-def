@@ -1,0 +1,7 @@
+subcode: init_mutex_condvar
+    $(if:USE_GASNET)
+        gasnet_hsl_init(&mutex);
+        gasnett_cond_init(&condvar);
+    $(else)
+        pthread_mutex_init(&mutex, 0);
+

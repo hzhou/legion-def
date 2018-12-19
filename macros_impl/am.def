@@ -1,0 +1,7 @@
+subcode: ampoll_
+    $(if:USE_GASNET)
+        CHECK_GASNET( gasnet_AMPoll() );
+    $(elif:USE_MPI)
+        ammpi_Poll();
+
+subcode: am_request_short
