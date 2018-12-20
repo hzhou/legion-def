@@ -223,18 +223,18 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   bool ok = cp.parse_command_line(cmdline);
   assert(ok);
 
-  size_t srcdatapool_size = sdpsize_in_mb << 20;
+  $call set_srcdatapool_sizes
   if(lmbsize_in_kb) lmb_size = lmbsize_in_kb << 10;
-  if(spillwarn_in_mb)
-    SrcDataPool::print_spill_threshold = spillwarn_in_mb << 20;
-  if(spillstep_in_mb)
-    SrcDataPool::print_spill_step = spillstep_in_mb << 20;
-  if(spillstall_in_mb)
-    SrcDataPool::max_spill_bytes = spillstall_in_mb << 20;
-
   size_t total_lmb_size = ((max_node_id+1) * 
 			   num_lmbs *
 			   lmb_size);
+    // add in our internal handlers and space we need for LMBs
+    size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
+                            (((size_t)registered_mem_size_in_mb) << 20) +
+                            (((size_t)registered_ib_mem_size_in_mb) << 20) +
+                            srcdatapool_size +
+                            total_lmb_size);
+
 
   $call init_endpoints
 #ifdef DEBUG_REALM_STARTUP
@@ -301,9 +301,7 @@ void stop_activemsg_threads(void)
   // dump timing data from all the endpoints to a file
   detailed_message_timing.dump_detailed_timing_data();
 #endif
-
-  // print final spill stats at a low logging level
-  srcdatapool->print_spill_data(Realm::Logger::LEVEL_INFO);
+    $call @on_stop_activemsg_threads
 }
 	
 void enqueue_message(NodeID target, int msgid,

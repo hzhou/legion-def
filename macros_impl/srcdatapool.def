@@ -1,0 +1,98 @@
+subcode: class_SrcDataPool
+    $template templates/activemsg_srcdatapool.cc
+    subcode: hsl_sdp(cmd)
+        $(if:USE_GASNET)
+            gasnet_hsl_$(cmd)(&sdp.mutex);
+        $(else)
+            pthread_mutex_$(cmd)(&sdp.mutex);
+
+# -- init_endpoints
+subcode: set_srcdatapool_sizes
+    size_t srcdatapool_size = sdpsize_in_mb << 20;
+    if(spillwarn_in_mb)
+        SrcDataPool::print_spill_threshold = spillwarn_in_mb << 20;
+    if(spillstep_in_mb)
+        SrcDataPool::print_spill_step = spillstep_in_mb << 20;
+    if(spillstall_in_mb)
+        SrcDataPool::max_spill_bytes = spillstall_in_mb << 20;
+
+# -- init_endpoints
+subcode: init_srcdatapool
+    #ifndef NO_SRCDATAPOOL
+    if(srcdatapool_size > 0)
+        srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
+    #endif
+
+# -- stop_activemsg_threads
+subcode:: on_stop_activemsg_threads
+    // print final spill stats at a low logging level
+    srcdatapool->print_spill_data(Realm::Logger::LEVEL_INFO);
+
+# -- ActiveMessageEndpoint::enqueue_messages
+subcode: alloc_spill_memory
+    SrcDataPool::Lock held_lock(*srcdatapool);
+    bool first_try = true;
+    while(!srcdatapool->alloc_spill_memory(hdr->payload_size,
+                                            hdr->msgid,
+                                            held_lock,
+                                            first_try)) {
+    log_spill.debug() << "spill reservation failed - retrying...";
+    first_try = false;
+    }
+# -- OutgoingMessage::~OutgoingMessage
+subcode: release_spill_memory
+    {
+    // TODO: find way to avoid taking lock here?
+    SrcDataPool::Lock held_lock(*srcdatapool);
+    srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
+    }
+    //record_spill_free(msgid, payload_size);
+# -- OutgoingMessage::reserve_srcdata
+subcode: alloc_srcptr
+    // try to get the needed space in the srcdata pool
+    assert(srcdatapool);
+
+    void *srcptr = 0;
+    {
+      // take the SDP lock
+      SrcDataPool::Lock held_lock(*srcdatapool);
+
+      srcptr = srcdatapool->alloc_srcptr(payload_size, held_lock);
+      log_sdp.info("got %p (%d)", srcptr, payload_mode);
+	
+      if(srcptr != 0) {
+	// if we had reserved spill space, we can give it back now
+	if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
+	  log_spill.debug() << "returning " << payload_size << " unneeded bytes of spill";
+	  srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
+	}
+
+	// allocation succeeded - update state, but do copy below, after
+	//  we've released the lock
+	payload_mode = PAYLOAD_SRCPTR;
+	payload = srcptr;
+      } else {
+	// if the allocation fails, we have to queue ourselves up
+
+	// if we've been instructed to copy the data, that has to happen now
+	// SJT: try to figure out/remember why this has to be done with lock held?
+	if(payload_mode == PAYLOAD_COPY) {
+	  void *copy_ptr = malloc(payload_size);
+	  assert(copy_ptr != 0);
+	  payload_src->copy_data(copy_ptr);
+	  delete payload_src;
+	  payload_src = new ContiguousPayload(copy_ptr, payload_size,
+					      PAYLOAD_FREE);
+	}
+
+	payload_mode = PAYLOAD_PENDING;
+	srcdatapool->add_pending(this, held_lock);
+      }
+    }
+
+    // do the copy now if the allocation succeeded
+    if(srcptr != 0) {
+      payload_src->copy_data(srcptr);
+      delete payload_src;
+      payload_src = 0;
+    }

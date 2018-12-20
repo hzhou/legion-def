@@ -19,12 +19,7 @@ OutgoingMessage::~OutgoingMessage(void)
       printf("%d: freeing payload %x = [%p, %p)\n",
 	     my_node_id, payload_num, payload, ((char *)payload) + payload_size);
 #endif
-      {
-	// TODO: find way to avoid taking lock here?
-	SrcDataPool::Lock held_lock(*srcdatapool);
-	srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
-      }
-      //record_spill_free(msgid, payload_size);
+      $call release_spill_memory
       deferred_free(payload);
     }
   }
@@ -79,53 +74,7 @@ void OutgoingMessage::reserve_srcdata(void)
   bool need_srcdata = (srcdatapool != 0);
   
   if(need_srcdata) {
-    // try to get the needed space in the srcdata pool
-    assert(srcdatapool);
-
-    void *srcptr = 0;
-    {
-      // take the SDP lock
-      SrcDataPool::Lock held_lock(*srcdatapool);
-
-      srcptr = srcdatapool->alloc_srcptr(payload_size, held_lock);
-      log_sdp.info("got %p (%d)", srcptr, payload_mode);
-	
-      if(srcptr != 0) {
-	// if we had reserved spill space, we can give it back now
-	if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
-	  log_spill.debug() << "returning " << payload_size << " unneeded bytes of spill";
-	  srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
-	}
-
-	// allocation succeeded - update state, but do copy below, after
-	//  we've released the lock
-	payload_mode = PAYLOAD_SRCPTR;
-	payload = srcptr;
-      } else {
-	// if the allocation fails, we have to queue ourselves up
-
-	// if we've been instructed to copy the data, that has to happen now
-	// SJT: try to figure out/remember why this has to be done with lock held?
-	if(payload_mode == PAYLOAD_COPY) {
-	  void *copy_ptr = malloc(payload_size);
-	  assert(copy_ptr != 0);
-	  payload_src->copy_data(copy_ptr);
-	  delete payload_src;
-	  payload_src = new ContiguousPayload(copy_ptr, payload_size,
-					      PAYLOAD_FREE);
-	}
-
-	payload_mode = PAYLOAD_PENDING;
-	srcdatapool->add_pending(this, held_lock);
-      }
-    }
-
-    // do the copy now if the allocation succeeded
-    if(srcptr != 0) {
-      payload_src->copy_data(srcptr);
-      delete payload_src;
-      payload_src = 0;
-    }
+    $call alloc_srcptr
   } else {
     // no srcdatapool needed, but might still have to copy
     if(payload_src->get_contig_pointer() &&
@@ -161,8 +110,6 @@ void OutgoingMessage::assign_srcdata_pointer(void *ptr)
   payload_mode = PAYLOAD_SRCPTR;
 
   if(was_using_spill) {
-    // TODO: find way to avoid taking lock here?
-    SrcDataPool::Lock held_lock(*srcdatapool);
-    srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
+    $call release_spill_memory
   }
 }

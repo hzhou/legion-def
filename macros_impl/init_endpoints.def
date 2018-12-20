@@ -12,13 +12,6 @@ subcode: init_segments
 
 #---------------------------------------- 
 template: init_endpoints_gasnet
-    // add in our internal handlers and space we need for LMBs
-    size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
-                            (((size_t)registered_mem_size_in_mb) << 20) +
-                            (((size_t)registered_ib_mem_size_in_mb) << 20) +
-                            srcdatapool_size +
-                            total_lmb_size);
-
     if(my_node_id == 0) {
         log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, IBRMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
                     gasnet_mem_size_in_mb, registered_mem_size_in_mb, registered_ib_mem_size_in_mb,
@@ -61,8 +54,4 @@ template: init_segments_gasnet
     /*char *lmb_base = my_segment;*/  my_segment += total_lmb_size;
     assert(my_segment <= ((char *)(segment_info[my_node_id].addr) + segment_info[my_node_id].size)); 
 
-    #ifndef NO_SRCDATAPOOL
-    if(srcdatapool_size > 0)
-        srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
-    #endif
-
+    $call init_srcdatapool

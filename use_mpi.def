@@ -2,6 +2,8 @@ include: macros_impl/am.def
 include: macros_impl/barrier.def
 include: macros_impl/hsl.def
 
+include: macros_impl/srcdatapool.def
+
 page: runtime_impl.h, from templates/runtime_impl.h
     module: cpp
     output_dir: ./realm_src
@@ -70,14 +72,6 @@ subcode: impl_IncomingMessageManager
 
 subcode: class_Payload
     $template templates/activemsg_payload.cc
-
-subcode: class_SrcDataPool
-    $template templates/activemsg_srcdatapool.cc
-    subcode: hsl_sdp(cmd)
-        $(if:USE_GASNET)
-            gasnet_hsl_$(cmd)(&sdp.mutex);
-        $(else)
-            pthread_mutex_$(cmd)(&sdp.mutex);
 
 subcode: struct_OutgoingMessage
     $template templates/activemsg_outgoing.cc

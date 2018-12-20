@@ -25,8 +25,7 @@ public:
   void release_srcptr(void *srcptr);
 
   // attempt to allocate spill memory (may block, and then return false, if limit is hit)
-  bool alloc_spill_memory(size_t size_needed, int msgtype, Lock& held_lock,
-			  bool first_try);
+  bool alloc_spill_memory(size_t size_needed, int msgtype, Lock& held_lock, bool first_try);
 
   // release spilled memory (usually by moving it into actual srcdatapool)
   void release_spill_memory(size_t size_released, int msgtype, Lock& held_lock);

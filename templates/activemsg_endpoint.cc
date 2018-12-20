@@ -127,15 +127,7 @@ public:
     if((hdr->payload_size > 0) &&
        ((hdr->payload_mode == PAYLOAD_COPY) ||
 	(hdr->payload_mode == PAYLOAD_FREE))) {
-      SrcDataPool::Lock held_lock(*srcdatapool);
-      bool first_try = true;
-      while(!srcdatapool->alloc_spill_memory(hdr->payload_size,
-					     hdr->msgid,
-					     held_lock,
-					     first_try)) {
-	log_spill.debug() << "spill reservation failed - retrying...";
-	first_try = false;
-      }
+      $call alloc_spill_memory
     }
 
     // need to hold the mutex in order to push onto one of the queues
