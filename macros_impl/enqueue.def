@@ -1,0 +1,53 @@
+macros:
+    AM_ENQUEUE: 1
+
+macros:
+    mutex: mutex_ammpi
+    queue: queue_ammpi
+    AM_params: i_target, msgid, n_args, args, is_short, payload, payload_size
+
+subcode:: _autoload
+    $register_name(msgid) int
+    $register_name(args) const void *
+    $register_name(payload) const void *
+    $register_name(payload_size) size_t
+    $struct(AM_Message) $(AM_params)
+    $global pthread_mutex_t $(mutex)=PTHREAD_MUTEX_INITIALIZER
+    $global std::deque<AM_Message> $(queue)
+
+subcode: with_lock
+    pthread_mutex_lock(&$(mutex))
+    BLOCK
+    pthread_mutex_unlock(&$(mutex))
+
+subcode: am_enqueue(@params)
+    &call with_lock
+        $(queue).push_back((AM_Message){$(params)})
+
+subcode: am_dequeue
+    $while !$(queue).empty()
+        &call with_lock
+            $my auto it = $(queue).begin()
+            $call @send_msg
+            $(queue).pop_front()
+
+    subcode: send_msg
+        $(set:args=(const int*)(it->args))
+        $if !it->is_short
+            AM_short_n(it->n_args, it->i_target, it->msgid, $(args))
+        $else
+            $call adjust_args
+            AM_medium_n(it->n_args, it->i_target, it->msgid, it->payload, it->payload_size, $(args))
+    
+    subcode: adjust_args
+        $my int* tp_args = (int*)(it->args)
+        $if tp_args[0]==BaseMedium::MESSAGE_ID_MAGIC
+            NOOP
+        $else
+            assert(tp_args[2]==BaseMedium::MESSAGE_ID_MAGIC)
+            tp_args += 2
+        tp_args[0] = next_outgoing_message_id++
+        tp_args[1] = 1
+        tp_args[2] = 0
+        tp_args[3] = 0
+

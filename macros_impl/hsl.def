@@ -14,22 +14,19 @@ subcode: hsl_decl(var)
     $(else)
         pthread_mutex_t $(var);
 
-subcode: hsl_init(var)
-    $(if:USE_GASNET)
-        gasnet_hsl_init(&$(var));
-    $(else)
-        pthread_mutex_init(&$(var));
-
-# --------------------
-subcode: hsl_mutex(cmd, mutex)
-    $(if:USE_GASNET)
-        gasnet_hsl_$(cmd)(&$(mutex))
-    $(else)
-        pthread_mutex_$(cmd)(&$(mutex))
 # --------------------
 subcode: hsl_(cmd)
     $call hsl_mutex, $(cmd), mutex
 
+subcode: hsl_mutex(cmd, mutex)
+    $(if:USE_GASNET)
+        gasnet_hsl_$(cmd)(&$(mutex))
+    $(else)
+        $(if:cmd=init)
+            pthread_mutex_init(&$(mutex), 0)
+        $(else)
+            pthread_mutex_$(cmd)(&$(mutex))
+# --------------------
 subcode: trylock_(return)
     # used in class EndpointManager
     $(if:USE_GASNET)
@@ -41,7 +38,7 @@ subcode: trylock_(return)
 	if(ret) $(return);
 
 subcode: cond_(cmd)
-    $(if:T=GASNetHSL)
+    $(if:T~GASNetCondVar)
         $(set:mutex=mutex.mutex)
     $(else)
         # e.g. Used in class EndpointManager
@@ -55,7 +52,7 @@ subcode: cond_(cmd)
     $(else)
         $(if:cmd=init)
             pthread_cond_init(&condvar,0)
-        $(else:cmd=wait)
+        $(elif:cmd=wait)
             pthread_cond_wait(&condvar, &$(mutex))
         $(else)
             pthread_cond_$(cmd)(&condvar)
@@ -97,7 +94,10 @@ subcode: HSL_impl(which)
 
     # -----------------
     subcode: M(@decl)
-        $:: $(T)::$(decl)
+        $(if:decl~$(T)|~)
+            $:: $(T)::$(decl)
+        $(else)
+            $:: void $(T)::$(decl)
         $: {
             BLOCK
         $: }

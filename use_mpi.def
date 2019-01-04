@@ -1,210 +1,147 @@
-include: macros_impl/am.def
-include: macros_impl/barrier.def
+include: macros_ammpi/am_mpi.def
+include: macros_impl/enqueue.def
+
 include: macros_impl/hsl.def
+include: macros_impl/util.def
 
-include: macros_impl/srcdatapool.def
+macros:
+    debug: 1
+    node_this: my_node_id
 
-page: runtime_impl.h, from templates/runtime_impl.h
-    module: cpp
+#---------------------------------------- 
+page: activemsg_impl_mpi.cc
     output_dir: ./realm_src
-
-page: runtime_impl.cc, from templates/runtime_impl.cc
     module: cpp
-    output_dir: ./realm_src
+    USE_MPI: 1
 
-    $(block:global_init)
-        #include <mpi.h>
+    $include mpi
+    $(if:0)
+        $typedef int gasnet_node_t
+        $typedef int32_t gasnet_handlerarg_t
+        $typedef int token_t
+    $call HSL_impl, pthread
+    # $template templates/activemsg_impl_gasnet.cc
+    $list AM_MPI_Init
+    $call list_AMs
+    $template templates/activemsg_impl_mpi.cc
 
-# page: activemsg.h, from templates/activemsg.h
-page: activemsg.cc, from templates/activemsg.cc
-    module: cpp
-    output_dir: ./realm_src
-
-    subcode: activemsg_decl_gasnet
-        $template templates/activemsg_decl_gasnet.cc
-    subcode: activemsg_decl_mpi
-        #include <mpi.h>
-        typedef int gasnet_node_t;
-        # typedef int token_t;
-        typedef int32_t gasnet_handlerarg_t;
-        $call activemsg_decl_other
-    subcode: activemsg_decl_other
-        #include <pthread.h>
-        #define GASNETHSL_IMPL     pthread_mutex_t mutex
-        #define GASNETCONDVAR_IMPL pthread_cond_t  condvar
-    # ----------------------------
-    subcode: activemsg_impl_gasnet
-        $(set:USE_GASNET=1)
-        $call HSL_impl, gasnet
-        $template templates/activemsg_impl_gasnet.cc
-    subcode: activemsg_impl_mpi
-        $(set:USE_MPI=1)
-        $call HSL_impl, pthread
-        $template templates/activemsg_impl_gasnet.cc
-    subcode: activemsg_impl_other
-        $call HSL_impl, pthread
-        $template templates/activemsg_impl_other.cc
-
-# page: mem_impl.h, from templates/mem_impl.h
-page: mem_impl.cc, from templates/mem_impl.cc
-    module: cpp
-    output_dir: ./realm_src
-
-#---- runtime_impl.cc ------------------------- 
-subcode: network_init_mpi
-    MPI_Init(NULL, NULL)
+fncode: AM_MPI_Init
+    $(if:0)
+        MPI_Init(NULL, NULL)
+    $(else)
+        $my int mpi_thread_model
+        MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model)
+        assert(mpi_thread_model==MPI_THREAD_MULTIPLE)
     MPI_Comm_size(MPI_COMM_WORLD, &max_node_id)
     MPI_Comm_rank(MPI_COMM_WORLD, &my_node_id)
-    $print "network_init_mpi: %d/%d", my_node_id, max_node_id
+    $(if:debug)
+        $print "network_init_mpi: %d/%d", my_node_id, max_node_id
     max_node_id--
+    $call @on_am_init
 
-#---- activemsg.cc ---------------------------- 
-subcode: class_EndpointManager
-    $template templates/activemsg_endpoint_manager.cc
-
-subcode: class_ActiveMessageEndpoint
-    $template templates/activemsg_endpoint.cc
-
-subcode: class_IncomingMessageManager
-    $template templates/activemsg_incoming_manager.cc
-subcode: impl_IncomingMessageManager
-    $template templates/activemsg_incoming_manager_impl.cc
-
-subcode: class_Payload
-    $template templates/activemsg_payload.cc
-
-subcode: struct_OutgoingMessage
-    $template templates/activemsg_outgoing.cc
-subcode: impl_OutgoingMessage
-    $template templates/activemsg_outgoing_impl.cc
-
-subcode: class_DetailedMessageTiming
-    $template templates/activemsg_timing.cc
 #---------------------------------------- 
 subcode: init_endpoints_mpi
     $call @parse_command_line
-    $call @init_srcdatapool
+    # $call @init_srcdatapool
     # $call @add_handlers
-
-    subcode: add_handlers
-        $typedef void (*HANDLER_T)()
-        $global const int MAX_HANDLERS=256
-        $global HANDLER_T am_mpi_handlers[MAX_HANDLERS] 
-        $(for:H in FLIP_REQ, FLIP_ACK, RELEASE_SRCPTR)
-            $(if:H=RELEASE_SRCPTR)
-                $(set:h=handler_$(H:lc))
-            $(else)
-                $(set:h=SrcDataPool::release_srcptr_handler)
-            am_mpi_handlers[MSGID_$(H)] = (void (*)())$(h)
+    g_am_manager.init_corereservation(crs)
 
 subcode: mpi_add_handler_entry # msgid, fnptr
     $list f_get_msgid
-    $print "mpi_add_handler_entry: %d - %s", msgid, f_get_msgid(msgid)
+    $(if:debug)
+        $print "mpi_add_handler_entry: %d - %s", msgid, f_get_msgid(msgid)
+    AM_add_handler(msgid, fnptr)
 
 subcode: mpi_enqueue_message(payload_type)
-    $call to_debug
-    assert(0 && "mpi_enqueue_message - $(payload_type) - active messages not available!");
+    $global int next_outgoing_message_id = 0
+    int n_args = arg_size/4;
+    # $call to_debug
+    $(if:debug)
+        $print "enqueue_message %d->%d [$(payload_type)-%d] - %d %s-", my_node_id, target, payload_mode, msgid, f_get_msgid(msgid)
+        $call debug_args
 
-#---------------------------------------- 
-subcode: to_debug
-    $include <unistd.h>, <stdlib.h>
-    $block
-        $my int i = 0
-        $print "[rank %d] use \"gdb out/main %d\" to debug ...", my_node_id, getpid()
-        $while 0==i
-            sleep(5)
+    $(set:is_short=payload_mode==PAYLOAD_NONE)
+    $call set_payload_size
 
-#---------------------------------------- 
-template: activemsg_mpi
-    void enqueue_message(NodeID target, int msgid,
-                        const void *args, size_t arg_size,
-                        const void *payload, size_t payload_size,
-                        int payload_mode, void *dstptr)
-    {
-        $call mpi_enqueue_message, ContiguousPayload
-    }
+    $(if:AM_ENQUEUE)
+        $call am_enqueue, target, msgid, n_args, args, $(is_short), payload, payload_size
+    $(else)
+        $call send_now
 
-    void enqueue_message(NodeID target, int msgid,
-                        const void *args, size_t arg_size,
-                        const void *payload, size_t line_size,
-                        off_t line_stride, size_t line_count,
-                        int payload_mode, void *dstptr)
-    {
-        $call mpi_enqueue_message, TwoDPayload
-    }
+    subcode: send_now
+        $(set:args=(const int*)args)
+        $if $(is_short)
+            AM_short_n(n_args, target, msgid, $(args))
+        $else
+            AM_medium_n(n_args, target, msgid, payload,payload_size, $(args))
 
-    void enqueue_message(NodeID target, int msgid,
-                        const void *args, size_t arg_size,
-                        const SpanList& spans, size_t payload_size,
-                        int payload_mode, void *dstptr)
-    {
-        $call mpi_enqueue_message, SpanPayload
-    }
+    subcode: set_payload_size
+        $(if:payload_type=ContiguousPayload)
+            NOOP
+        $(elif:payload_type=TwoDPayload)
+            $my size_t payload_size = line_size*line_count
+        $(else)
+            $my const void *payload = NULL
+            assert(0 && "mpi_enqueue_message - $(payload_type) - active messages not available!");
 
-    void do_some_polling(void)
-    {
-    assert(0 && "compiled without USE_GASNET - active messages not available!");
-    }
+    subcode: debug_args
+        $print " - %d:-", n_args
+        $for i=0:n_args
+            $print " %8x-", ((int*)args)[i]
+        $print
 
-    size_t get_lmb_size(NodeID target_node)
-    {
-    return 0;
-    }
+subcode: mpi_thread_loop
+    $while true
+        $if shutdown_flag
+            break
+        $(if:AM_ENQUEUE)
+            $call am_dequeue
+        AMPoll();
 
-    void record_message(NodeID source, bool sent_reply)
-    {
-    }
+# called in machine_impl.cc - await_all_annoucements
+subcode: mpi_do_some_polling
+    # AMPoll()
 
-    void send_srcptr_release(token_t token, uint64_t srcptr)
-    {
-    }
+subcode: mpi_get_message_source
+    return (int)(long)token
 
-    NodeID get_message_source(token_t token)
-    {
-    return 0;
-    }
+subcode: mpi_enqueue_incoming
+    $(if:debug)
+        $print "[%d] running msg handler", my_node_id
+    msg->run_handler()
+    # assert(0 && "compiled without USE_GASNET - active messages not available!");
 
-    void enqueue_incoming(NodeID sender, IncomingMessage *msg)
-    {
-    assert(0 && "compiled without USE_GASNET - active messages not available!");
-    }
+subcode: mpi_handle_long_msgptr
+    $(if:debug)
+        $print "mpi_handle_long_msgptr"
+    # assert(0 && "compiled without USE_GASNET - active messages not available!");
 
-    bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
-                            int message_id, int chunks)
-    {
-    return false;
-    }
+subcode: mpi_adjust_long_msgsize
+    return true
+    # assert(0 && "adjust_long_msgsize not available")
 
-    void handle_long_msgptr(NodeID source, const void *ptr)
-    {
-    assert(0 && "compiled without USE_GASNET - active messages not available!");
-    }
+subcode: mpi_record_message
+    $(if:debug)
+        $print "mpi_record_message %d", sent_reply
 
-    void add_handler_entry(int msgid, void (*fnptr)())
-    {
-        $call mpi_add_handler_entry
-    }
+macros:
+    AM_POLL: thread
 
-    void init_endpoints(int gasnet_mem_size_in_mb,
-                        int registered_mem_size_in_mb,
-                        int registered_ib_mem_size_in_mb,
-                        Realm::CoreReservationSet& crs,
-                        std::vector<std::string>& cmdline)
-    {
-        $call init_endpoints_mpi
-    }
+subcode: mpi_start_polling_threads
+    $(if:debug)
+        $print "start_polling_threads."
+    g_am_manager.start_threads();
 
-    void start_polling_threads(int)
-    {
-    }
+subcode: mpi_start_handler_threads
+    $(if:debug)
+        $print "start_handler_threads %d", count
 
-    void start_handler_threads(int, Realm::CoreReservationSet&, size_t)
-    {
-    }
+subcode: mpi_stop_activemsg_threads
+    $(if:debug)
+        $print "stop_activemsg_threads "
+    # assert(0)
+    g_am_manager.stop_threads();
 
-    void stop_activemsg_threads(void)
-    {
-    }
 
 #---- Common ------------------------------------ 
 macros:

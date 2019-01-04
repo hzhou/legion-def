@@ -2,7 +2,7 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    # run: cd out && make -j16 && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
+    # run: cd out && make -f Makefile.gasnet -j8 && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
     run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, INIT, DAXPY, CHECK
@@ -215,7 +215,7 @@ fncode: AdversarialMapper::report_profiling(api mapper_profiling)
                 $print "Task %s: $1", task.get_task_name()
 
     &call get_measurement, OperationTimeline, timeline
-        $print "Operation timeline for task %s: ready=%d, start=%d, stop=%d", task.get_task_name(), timeline->ready_time, timeline->start_time, timeline->end_time
+        $print "Operation timeline for task %s: ready=%lld, start=%lld, stop=%lld", task.get_task_name(), timeline->ready_time, timeline->start_time, timeline->end_time
 
     &call get_measurement, RuntimeOverhead, overhead
         $my long long total = overhead->application_time+overhead->runtime_time+overhead->wait_time

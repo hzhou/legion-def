@@ -2,7 +2,8 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    run: cd out && make && ./main
+    # run: cd out && make && ./main
+    run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, INIT, DAXPY, CHECK
 
@@ -32,9 +33,10 @@ fncode: TOP_task
 
     subcode: daxpy
         &call launch_task_, -, INIT
-            $call region_require, rA, WRITE_DISCARD, EXCLUSIVE, X
+            # set $(ACCESS), default is EXCLUSIVE
+            $call region_require, rA, WRITE_DISCARD, X
         &call launch_task_, -, INIT
-            $call region_require, rA, WRITE_DISCARD, EXCLUSIVE, Y
+            $call region_require, rA, WRITE_DISCARD, Y
 
         $(if:1)
             $my const double alpha = drand48()
@@ -43,44 +45,43 @@ fncode: TOP_task
 
         $(set:arg=alpha)
         &call launch_task_, -, DAXPY
-            $call region_require, rA, READ_ONLY, EXCLUSIVE, X, Y
-            $call region_require, rB, WRITE_DISCARD, EXCLUSIVE, Z
+            $call region_require, rA, READ_ONLY, X, Y
+            $call region_require, rB, WRITE_DISCARD, Z
 
         &call launch_task_, -, CHECK
-            $call region_require, rA, READ_ONLY, EXCLUSIVE, X, Y
-            $call region_require, rB, READ_ONLY, EXCLUSIVE, Z
+            $call region_require, rA, READ_ONLY, X, Y
+            $call region_require, rB, READ_ONLY, Z
 
 fncode: INIT_task
-    &call with_fields, 0, WRITE_DISCARD, T:double
-        &call each_row
-            $(if:1)
-                $(F:0) = drand48()
-            $(else)
-                $(F:0) = 1.0
+    &call task_
+        &call with_fields, :X
+            &call each_row
+                $(if:1)
+                    $(F:X) = drand48()
+                $(else)
+                    $(F:X) = 1.0
 
 fncode: DAXPY_task
-    $call task_arg, double alpha
-    &call with_fields, 0, READ_ONLY, X, Y
-        &call with_fields, 1, WRITE_DISCARD, Z
-            &call each_row
-                $(F:Z) = alpha * $(F:X) + $(F:Y)
+    &call task_
+        $call args, double alpha
+        &call with_fields, X, Y
+            &call with_fields, Z
+                &call each_row
+                    $(F:Z) = alpha * $(F:X) + $(F:Y)
 
 fncode: CHECK_task
-    $call task_arg, double alpha
-    b_all_passed = true
-    &call with_fields, 0, READ_ONLY, X, Y
-        &call with_fields, 1, READ_ONLY, Z
-            &call each_row
-                f_expected = alpha * $(F:X) + $(F:Y)
-                f_got = $(F:Z)
-                $if f_expected != f_got
-                    $print mismatch: $f_expected != $f_got
-                    b_all_passed = false
-    $if b_all_passed
-        $print "All passed!"
-    $else
-        $print "Failed!"
-
-
-
-
+    &call task_
+        $call args, double alpha
+        b_all_passed = true
+        &call with_fields, X, Y
+            &call with_fields, Z
+                &call each_row
+                    f_expected = alpha * $(F:X) + $(F:Y)
+                    f_got = $(F:Z)
+                    $if f_expected != f_got
+                        $print mismatch: $f_expected != $f_got
+                        b_all_passed = false
+        $if b_all_passed
+            $print "All passed!"
+        $else
+            $print "Failed!"

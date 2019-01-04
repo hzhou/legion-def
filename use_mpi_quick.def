@@ -1,0 +1,199 @@
+include: macros_impl/util.def
+macros: 
+    USE_MPI: 1
+    comm: MPI_COMM_WORLD
+
+page: runtime_impl.h, from templates/runtime_impl.h
+    module: cpp
+    output_dir: ./realm_src
+
+    # void *nogasnet_regmem_base
+    # void *nogasnet_reg_ib_mem_base
+
+page: runtime_impl.cc, from templates/runtime_impl.cc
+    module: cpp
+    output_dir: ./realm_src
+
+    $(block:global_init)
+        $include mpi
+        void AM_MPI_Init();
+
+    subcode: network_init_mpi
+        AM_MPI_Init();
+
+# page: mem_impl.h, from templates/mem_impl.h
+page: mem_impl.cc, from templates/mem_impl.cc
+    module: cpp
+    output_dir: ./realm_src
+
+    # RDMA
+    # gasnet_get()
+
+# page: activemsg.h, from templates/activemsg.h
+page: activemsg.cc, from templates/activemsg.cc
+    module: cpp
+    output_dir: ./realm_src
+
+#---------------------------------------- 
+#---- RuntimeImpl::collective_spawn
+
+subcode: mpi_gather_all_events(event)
+    $(set:buf=$1, sizeof(Event), MPI_BYTE)
+    MPI_Gather($(buf:&$(event)), $(buf:all_events), root, $(comm))
+
+subcode: mpi_bcast_event(event)
+    $(set:buf=$1, sizeof(Event), MPI_BYTE)
+    MPI_Bcast($(buf:&$(event)), root, $(comm))
+
+#---------------------------------------- 
+subcode: mpi_collective_spawn
+    # root node will be whoever owns the target proc
+    int root = ID(target_proc).proc.owner_node;
+    Event *all_events = 0;
+    $if (int)my_node_id == root
+        $call collective_spawn_root
+    $else
+        $call collective_spawn_nonroot
+
+template: collective_spawn_root
+    // step 1: receive wait_on from every node
+    all_events = new Event[max_node_id + 1];
+    # gasnet_coll_gather(GASNET_TEAM_ALL, root, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_gather_all_events, wait_on
+
+    // step 2: merge all the events
+    std::set<Event> event_set;
+    for(NodeID i = 0; i <= max_node_id; i++) {
+        //log_collective.info() << "ev " << i << ": " << all_events[i];
+        if(all_events[i].exists())
+        event_set.insert(all_events[i]);
+    }
+    delete[] all_events;
+
+    Event merged_event = Event::merge_events(event_set);
+    log_collective.info() << "merged precondition: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << merged_event;
+
+    // step 3: run the task
+    Event finish_event = target_proc.spawn(task_id, args, arglen, merged_event, priority);
+
+    // step 4: broadcast the finish event to everyone
+    # gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, &finish_event, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_bcast_event, finish_event
+
+    log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
+
+    return finish_event;
+
+template: collective_spawn_nonroot
+    // NON-ROOT NODE
+
+    // step 1: send our wait_on to the root for merging
+    # gasnet_coll_gather(GASNET_TEAM_ALL, root, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_gather_all_events, wait_on
+
+    // steps 2 and 3: twiddle thumbs
+
+    // step 4: receive finish event
+    Event finish_event;
+    # gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, 0, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_bcast_event, finish_event
+
+    log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
+
+    return finish_event;
+
+#---------------------------------------- 
+subcode: mpi_collective_spawn_by_kind
+    Event *all_events = 0;
+    Event merged_event;
+    int root = 0;
+    $if my_node_id == root
+        $call collective_spawn_by_kind_root
+    $else
+        $call collective_spawn_by_kind_nonroot
+
+template: collective_spawn_by_kind_root
+    // step 1: receive wait_on from every node
+    all_events = new Event[max_node_id + 1];
+    # gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_gather_all_events, wait_on
+
+    // step 2: merge all the events
+    std::set<Event> event_set;
+    for(NodeID i = 0; i <= max_node_id; i++) {
+        //log_collective.info() << "ev " << i << ": " << all_events[i];
+        if(all_events[i].exists())
+        event_set.insert(all_events[i]);
+    }
+    delete[] all_events;
+
+    merged_event = Event::merge_events(event_set);
+
+    // step 3: broadcast the merged event back to everyone
+    # gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, &merged_event, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_bcast_event, merged_event
+
+template: collective_spawn_by_kind_nonroot
+    // step 1: send our wait_on to the root for merging
+    # gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_gather_all_events, wait_on
+
+    // step 2: twiddle thumbs
+
+    // step 3: receive merged wait_on event
+    # gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_bcast_event, merged_event
+
+#---------------------------------------- 
+subcode: mpi_collective_merged_finish
+    $if my_node_id == root
+        $call collective_merged_finish_root
+    $else
+        $call collective_merged_finish_nonroot
+
+template: collective_merged_finish_root
+    // step 1: receive wait_on from every node
+    all_events = new Event[max_node_id + 1];
+    # gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_gather_all_events, my_finish
+
+    // step 2: merge all the events
+    std::set<Event> event_set;
+    for(NodeID i = 0; i <= max_node_id; i++) {
+        //log_collective.info() << "ev " << i << ": " << all_events[i];
+        if(all_events[i].exists())
+        event_set.insert(all_events[i]);
+    }
+    delete[] all_events;
+
+    Event merged_finish = Event::merge_events(event_set);
+
+    // step 3: broadcast the merged event back to everyone
+    # gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, &merged_finish, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_bcast_event, merged_finish
+
+    log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
+
+    return merged_finish;
+
+template: collective_merged_finish_nonroot
+    // step 1: send our wait_on to the root for merging
+    # gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_gather_all_events, my_finish
+
+    // step 2: twiddle thumbs
+
+    // step 3: receive merged wait_on event
+    Event merged_finish;
+    # gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
+    $call mpi_bcast_event, merged_finish
+
+    log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
+
+    return merged_finish;
+
+#---------------------------------------- 
+#---- RuntimeImpl::wait_for_shutdown
+subcode: mpi_shutdown_barrier
+    MPI_Barrier($(comm));
+

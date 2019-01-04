@@ -1,0 +1,22 @@
+#---- activemsg.cc ---------------------------- 
+subcode: class_EndpointManager
+    $template templates/activemsg_endpoint_manager.cc
+
+subcode: class_ActiveMessageEndpoint
+    $template templates/activemsg_endpoint.cc
+
+subcode: class_IncomingMessageManager
+    $template templates/activemsg_incoming_manager.cc
+subcode: impl_IncomingMessageManager
+    $template templates/activemsg_incoming_manager_impl.cc
+
+subcode: class_Payload
+    $template templates/activemsg_payload.cc
+
+subcode: struct_OutgoingMessage
+    $template templates/activemsg_outgoing.cc
+subcode: impl_OutgoingMessage
+    $template templates/activemsg_outgoing_impl.cc
+
+subcode: class_DetailedMessageTiming
+    $template templates/activemsg_timing.cc

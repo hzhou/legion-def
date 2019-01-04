@@ -1961,6 +1961,8 @@ namespace Realm {
 
 	return finish_event;
       }
+#elif defined USE_MPI
+    $call mpi_collective_spawn
 #else
       // no GASNet, so a collective spawn is the same as a regular spawn
       Event finish_event = target_proc.spawn(task_id, args, arglen, wait_on, priority);
@@ -2022,6 +2024,8 @@ namespace Realm {
 	// step 3: receive merged wait_on event
 	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
       }
+#elif defined USE_MPI
+    $call mpi_collective_spawn_by_kind
 #else
       // no GASNet, so our precondition is the only one
       Event merged_event = wait_on;
@@ -2091,6 +2095,8 @@ namespace Realm {
 
 	return merged_finish;
       }
+#elif defined USE_MPI
+    $call mpi_collective_merged_finish
 #else
       // no GASNet, so just return our locally merged event
       log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << my_finish;
@@ -2256,6 +2262,8 @@ namespace Realm {
       // don't start tearing things down until all processes agree
       gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
       gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+#elif defined USE_MPI
+    $call mpi_shutdown_barrier
 #endif
 
       // Shutdown all the threads
@@ -2376,6 +2384,7 @@ namespace Realm {
     GenEventImpl *RuntimeImpl::get_genevent_impl(Event e)
     {
       ID id(e);
+      // $call to_debug
       assert(id.is_event());
 
       Node *n = &nodes[id.event.creator_node];

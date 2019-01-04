@@ -2,7 +2,8 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    run: cd out && make && ./main
+    # run: cd out && make && ./main
+    run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $(set:worker_attr=leaf) # a bit less elegant, but will do now
     $map register_task, TOP, worker
@@ -31,9 +32,10 @@ fncode: TOP_task
     $if b_all_passed
         $print All checks passed!
 
-fncode: worker_task: int
-    $call task_index_i
-    $print Hello world from task $i
-    $call task_local_arg, n
-    return n*2
+fncode: worker_task(): int
+    &call task_
+        i = $(i_task)
+        $print Hello world from task $i
+        $call local_args, n
+        return n*2
 

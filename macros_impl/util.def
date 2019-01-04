@@ -1,0 +1,8 @@
+subcode: to_debug
+    $include <unistd.h>, <stdlib.h>
+    $block
+        $my int i = 0
+        $print "[rank %d] use \"gdb out/main %d\" to debug ...", my_node_id, getpid()
+        $while 0==i
+            sleep(5)
+

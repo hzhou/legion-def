@@ -2,7 +2,8 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    run: cd out && make && ./main
+    # run: cd out && make && ./main
+    run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, fibonacci, sum
 
@@ -35,8 +36,9 @@ fncode: TOP_task
             n = atoi($(a))
             break
 
-fncode: fibonacci_task: int
-    $call task_arg, n
+fncode: fibonacci_task(): int
+    &call task_
+        $call args, n
     $if n==0
         return 0
     $elif n==1
@@ -52,7 +54,8 @@ fncode: fibonacci_task: int
 
     return t.get_result<int>()
 
-fncode: sum_task: int
-    $call task_future_args, a, b
+fncode: sum_task(): int
+    &call task_
+        $call future_args, int a, int b
     return a+b
 

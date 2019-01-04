@@ -9,6 +9,9 @@ subcode: legion_frame
         return Runtime::start(argc, argv)
 
 #---- Tasks ------------------------------------ 
+#- Conventions:
+#-   * NAME refers to task name: fncode: $(NAME)_task, $(NAME)_TASK_ID
+
 subcode: _autoload
     enum Task_ID {
       DUMP_STUB enum_task_ids
@@ -39,7 +42,6 @@ subcode: register_task(NAME)
         Runtime::preregister_task_variant<$(type), $(NAME)_task>(registrar, "$(NAME) task")
     $: }
 
-#---------------------------------------- 
 #---------------------------------------- 
 subcode: each_argv_i
     $my const InputArgs &args = Runtime::get_input_args()
@@ -155,26 +157,27 @@ subcode: launch_task_frame(launch_type)
                 MyDef::compileutil::set_current_macro("R_root", $param)
 
 #---- task functions ------------------------------------ 
-subcode: task_(NAME)
+subcode: task_
     BLOCK
     subcode: with_fields(@fields)
+        $(set:NAME=$(subst:FunctionName:_task$:))
         $(for:f in $(fields))
-            $(if:f~:)
+            $(if:f~:) # e.g. :X -- filed polymorphic
                 $(set:f=$(f:1:))
+                $(set:rid=$(_T_$(NAME)_$(f)_rid))
+                $(set:R=regions[$(rid)])
+                $(set:fids=task->$(R).privilege_fields)
+                $:: FieldID fid = *($(fids).begin());
                 $(set:fid=fid)
-            $(else)
+            $(else)   # X -- X_FID
+                $(set:rid=$(_T_$(NAME)_$(f)_rid))
+                $(set:R=regions[$(rid)])
                 $(set:fid=$(f)_FID)
             # ----
-            $(set:rid=$(_T_$(NAME)_$(f)_rid))
-            $(set:phys_R=regions[$(rid)])
-            $(set:logi_R=task->regions[$(rid)].region)
+            $(set:_t=$(_T_$(NAME)_$(f)_priv),$($(f)_type),1)
+            $my const FieldAccessor<$(_t)> acc_$(f)($(R), $(fid))
             # -------
-            $(if:fid=fid)
-                $(set:fids=task->regions[$(rid)].privilege_fields)
-                $:: FieldID $(fid) = *($(fids).begin());
-            $(set:temp=$(_T_$(NAME)_$(f)_priv),$($(f)_type),1)
-            $my const FieldAccessor<$(temp)> acc_$(f)($(phys_R), $(fid))
-            # -------
+            $(set:logi_R=task->$(R).region)
             $(export:logi_R)
         BLOCK
 
@@ -203,16 +206,19 @@ subcode: task_(NAME)
 
     # ------------------------
     subcode: args(@var_list)
+        # $(arg) in launch_task
         $(for:a in $(var_list))
             $call perl_set_arg_a_T, $(a)
             $my $(T) $(a) = ((const $(T) *)task->args)[$(_i)]
 
     subcode: local_args(@var_list)
+        # ArgumentMap
         $(for:a in $(var_list))
             $call perl_set_arg_a_T, $(a)
             $my $(T) $(a) = ((const $(T) *)task->local_args)[$(_i)]
 
     subcode: future_args(@var_list)
+        # TaskLauncher::add_future(.)
         $(for:a in $(var_list))
             $call perl_set_arg_a_T, $(a)
             $my $(T) $(a) = task->futures[$(_i)].get_result<$(T)>()
@@ -221,7 +227,6 @@ subcode: task_(NAME)
         my $var = MyDef::output_c::parse_var($param)
         MyDef::compileutil::set_current_macro("T", $var->{type})
         MyDef::compileutil::set_current_macro("a", $var->{name})
-
 
 #-==== logical regions ======================================
 subcode: create_index_space_unbounded(t, N)
@@ -391,12 +396,12 @@ subcode: get_all_procs
             BLOCK
 
     subcode: dump_all_procs
-        $print "There are %d processors:", all_procs.size()
+        $print "There are %lu processors:", all_procs.size()
         &call stl_iter all_procs
             $my Processor::Kind kind = it->kind()
             $(for:LOC,TOC,IO,UTIL and CPU, GPU, I/O Proc, utility)
                 $case kind == Processor::$1_PROC
-                    $print "Processor %d is $2", it->id
+                    $print "Processor %llx is $2", it->id
             $else
                 $call die, "Invalid processor"
 
@@ -407,15 +412,15 @@ subcode: get_all_mems
     BLOCK
 
     subcode: dump_all_mems
-        $print "There are %d memories:", all_mems.size()
+        $print "There are %lu memories:", all_mems.size()
         &call stl_iter all_mems
             $my Memory::Kind kind = it->kind()
             $(for:GLOBAL,SYSTEM,REGDMA,SOCKET,Z_COPY,GPU_FB,DISK,HDF,FILE)
                 $case kind == Memory::$1_MEM
-                    $print "    Memory $1 (%d): %d KB", it->id, it->capacity()>>10
+                    $print "    Memory $1 (%d): %lu KB", (int)it->id, it->capacity()>>10
             $(for:LEVEL3,LEVEL2,LEVEL1)
                 $case kind == Memory::$1_CACHE
-                    $print "    $1 Cache (%d): %d KB", it->id, it->capacity()>>10
+                    $print "    $1 Cache (%d): %lu KB", (int)it->id, it->capacity()>>10
     
 subcode: get_vis_mems
     $my std::set<Memory> vis_mems
@@ -423,8 +428,8 @@ subcode: get_vis_mems
     BLOCK
 
     subcode: dump_vis_mems
-        $print "There are %d memories visible from processor %d", vis_mems.size(), local_proc.id
+        $print "There are %lu memories visible from processor %d", vis_mems.size(), (int)local_proc.id
         &call stl_iter vis_mems
             $my std::vector<ProcessorMemoryAffinity> affinities
             $: int results = machine.get_proc_mem_affinity(affinities, local_proc, *it);
-            $print "  Memory %d has bandwidth %d and latency %d", it->id, affinities[0].bandwidth, affinities[0].latency
+            $print "  Memory %d has bandwidth %d and latency %d", (int)it->id, affinities[0].bandwidth, affinities[0].latency

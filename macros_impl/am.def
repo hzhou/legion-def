@@ -36,10 +36,10 @@ subcode: AM_get_maxes
 subcode: send_short_cases
     $(for:1-6,8,10,12,14,16)
         $of $1
+            $(set:n=$1)
+            $(set:n-=1)
+            $(set:args=$(join:hdr->args[*]:, :0-$(n)))
             $if hdr->payload_mode != PAYLOAD_NONE
-                $(set:n=$1)
-                $(set:n-=1)
-                $(set:args=$(join:hdr->args[*]:, :0-$(n)))
                 $call AM_, RequestMedium$1, hdr->msgid, hdr->payload, hdr->payload_size, $(args)
             $else
                 $call AM_, RequestShort1, hdr->msgid, $(args)
