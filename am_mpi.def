@@ -1,0 +1,20 @@
+include: macros_ammpi/am_mpi.def
+# include: macros_impl/enqueue.def
+
+macros:
+    AM_POLL: thread
+
+page: am_mpi.cc
+    output_dir: ./realm_src
+    module: cpp
+    dump_h: am_mpi.h
+    # debug: 1
+
+    $include <mpi.h>
+    $list AM_add_handler
+    $list AMPoll, AM_short_n, AM_medium_n
+    $call list_AMs
+
+subcode: _autoload
+    $(setmacro:node_this=my_node_id)
+    extern int my_node_id;
