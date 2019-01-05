@@ -2851,9 +2851,6 @@ extern void record_message(NodeID source, bool sent_reply)
 #endif
 }
 
-#elif defined USE_MPI
-/* Compiled in with Makefile magic */
-/* #include "activemsg_impl_mpi.cc" */
 #else // defined USE_GASNET
 
 GASNetHSL::GASNetHSL(void)
@@ -2905,6 +2902,7 @@ void GASNetCondVar::wait(void)
   pthread_cond_wait(&condvar, &mutex.mutex);
 }
 
+#ifndef USE_MPI
 void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const void *payload, size_t payload_size,
@@ -2995,4 +2993,5 @@ void stop_activemsg_threads(void)
 {
 }
 
+#endif // !defined USE_MPI
 #endif

@@ -2,7 +2,8 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    run: cd out && make && ./main
+    # run: cd out && make && ./main
+    run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, INIT, STENCIL, CHECK
 

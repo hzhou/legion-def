@@ -11,17 +11,11 @@ page: activemsg_impl_mpi.cc
     USE_MPI: 1
 
     $include "am_mpi.h"
-    $include <pthread.h>
     $include <mpi.h>
     NEWLINE
-    #define GASNETHSL_IMPL     pthread_mutex_t mutex
-    #define GASNETCONDVAR_IMPL pthread_cond_t  condvar
-    #include "realm/activemsg.h"
-    $(for:cmdline,threads,timers,logging)
-        #include "realm/$1.h"
+    $(for:activemsg, cmdline,threads,timers,logging)
+        $include "realm/$1.h"
     NEWLINE
-
-    $call HSL_impl, pthread
 
     $list AM_MPI_Init
     $template templates/activemsg_impl_mpi.cc
