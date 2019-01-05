@@ -372,19 +372,20 @@ subcode: mapper_class(name, parent, @methods)
     };
 
 #---------------------------------------- 
-macros:
-    PART_MAPPER_ID: 1
-    PART_TUNER_ID: 1
+subcode: register_mapper
+    $function fn_register_mapper(api mapper_register)
+        &call stl_iter, proc_set
+            # each LOC_PROC (GPU?)
+            BLOCK
+    Runtime::add_registration_callback(fn_register_mapper);
 
-subcode: set_mapper(default_mapper, partition_mapper)
-    &call stl_iter, proc_set
-        rt->replace_default_mapper(new $(default_mapper)(machine, rt, *it), *it);
-        rt->add_mapper($(PART_MAPPER_ID), new $(partition_mapper)(machine, rt, *it), *it);
+    subcode: set_default_mapper(MapperClass)
+        rt->replace_default_mapper(new $(MapperClass)(machine, rt, *it), *it);
 
-subcode: get_partition_count(var)
-    $(var) = runtime->select_tunable_value(ctx, $(PART_TUNER_ID), $(PART_MAPPER_ID)).get_result<size_t>();
+    subcode: add_mapper(MapperClass, ID)
+        rt->add_mapper($(ID), new $(MapperClass)(machine, rt, *it), *it);
 
-#---------------------------------------- 
+#---- Mapper info ----------------------- 
 subcode: get_all_procs
     $my std::set<Processor> all_procs
     machine.get_all_processors(all_procs)
@@ -397,7 +398,7 @@ subcode: get_all_procs
 
     subcode: dump_all_procs
         $print "There are %lu processors:", all_procs.size()
-        &call stl_iter all_procs
+        &call stl_iter, all_procs
             $my Processor::Kind kind = it->kind()
             $(for:LOC,TOC,IO,UTIL and CPU, GPU, I/O Proc, utility)
                 $case kind == Processor::$1_PROC
@@ -433,3 +434,44 @@ subcode: get_vis_mems
             $my std::vector<ProcessorMemoryAffinity> affinities
             $: int results = machine.get_proc_mem_affinity(affinities, local_proc, *it);
             $print "  Memory %d has bandwidth %d and latency %d", (int)it->id, affinities[0].bandwidth, affinities[0].latency
+
+#---- can be called from mapper constructor ----
+subcode: dump_mapper_info
+    &call get_all_procs
+        &call if_first_proc
+            $call dump_all_procs
+            &call get_all_mems
+                $call dump_all_mems
+            &call get_vis_mems
+                $call dump_vis_mems
+
+#---- mapper report_profiling ------------------ 
+subcode: report_profiling
+    using namespace ProfilingMeasurements;
+    BLOCK
+    # ----------------------
+    subcode: OperationStatus
+        &call get_measurement, OperationStatus, status
+            $(for:COMPLETED_SUCCESSFULLY,COMPLETED_WITH_ERRORS,INTERRUPT_REQUESTED,TERMINATED_EARLY,CANCELLED)
+                $case status->result == OperationStatus::$1
+                    $print "Task %s: $1", task.get_task_name()
+    subcode: OperationTimeline
+        &call get_measurement, OperationTimeline, timeline
+            $print "Operation timeline for task %s: ready=%lld, start=%lld, stop=%lld", task.get_task_name(), timeline->ready_time, timeline->start_time, timeline->end_time
+    subcode: RuntimeOverhead
+        &call get_measurement, RuntimeOverhead, overhead
+            $my long long total = overhead->application_time+overhead->runtime_time+overhead->wait_time
+            $if total<=0
+                total =1
+            $print "Runtime overhead for task %s: runtime=%.1f%%, wait = %.1f%%", task.get_task_name(), 100.0 * overhead->runtime_time / total, 100.0*overhead->wait_time/total
+
+    # --------------------------------
+    subcode: get_measurement(WHAT, var)
+        $my $(WHAT) *$(var) = input.profiling_responses.get_measurement<$(WHAT)>()
+        $if $(var)
+            BLOCK
+            delete $(var)
+        $else
+            $print "No $(WHAT) for task %s", task.get_task_name()
+
+

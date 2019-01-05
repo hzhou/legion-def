@@ -51,6 +51,7 @@ fncode: STENCIL_task
         &call with_fields, VAL, DERIV
             &call with_rect
                 $if $(i1)<2 || $(i2)>=n_elements-2
+                    # first & last partition
                     $call stencil_slow
                 $else
                     $call stencil_fast
@@ -58,14 +59,14 @@ fncode: STENCIL_task
         $print "Running slow stencil path for point %d...", $(i_task)
         &call each_row
             $call set_l1_l2_r1_r2
-            acc_DERIV[*it] = (-l2+8*l1-8*r1+r2)/12
+            $(F:DERIV) = (-l2+8*l1-8*r1+r2)/12
     subcode: stencil_fast
         $print "Running fast stencil path for point %d...", $(i_task)
         &call each_row
             $my  l1,l2,r1,r2: double
             $(for:l1,l2,r1,r2 and -1,-2,+1,+2)
                 $1 = acc_VAL[*it $2]
-            acc_DERIV[*it] = (-l2+8*l1-8*r1+r2)/12
+            $(F:DERIV) = (-l2+8*l1-8*r1+r2)/12
 
 fncode: CHECK_task
     &call task_
@@ -79,7 +80,7 @@ fncode: CHECK_task
             f_expected = (-l2+8*l1-8*r1+r2)/12
             f_got = $(F:DERIV)
             $if f_expected != f_got
-                $print mismatch: $f_expected != $f_got
+                $print "mismatch[%d]: $f_expected != $f_got", (*it+0)
                 b_all_passed = false
     $if b_all_passed
         $print "All passed!"

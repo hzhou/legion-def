@@ -1,86 +1,12 @@
 include: macros/legion.def
+include: tutorials/daxpy.def
 
 page: main.cc, legion_frame
     module: cpp
-    # run: cd out && make && ./main
+    # run: cd out && make -f Makefile.gasnet && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
     run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, INIT, DAXPY, CHECK
 
 macros:
-    X_type: double
-    Y_type: double
-    Z_type: double
-
-fncode: TOP_task
-    n_elements = 1024
-    n_subregions = 4
-    $print Running daxpy for $n_elements elements, partitioning into $n_subregions sub-regions...
-    $call @create_logical_regions
-    $call @do_partitions
-    # $call get_physical_region, rA, READ_WRITE, X, Y
-    # $call get_physical_region, rB, WRITE_DISCARD, Z
-    $call @daxpy
-
-    DUMP_STUB _delete_regions
-    DUMP_STUB _delete_spaces
-
-    subcode: create_logical_regions
-        $call create_index_space, iA, n_elements
-
-        $call create_field_space, fA, X, Y
-        $call create_field_space, fB, Z
-
-        $call create_logical_region, rA, iA, fA
-        $call create_logical_region, rB, iA, fB
-
-    subcode: do_partitions
-        $call create_partition, iA, n_subregions, rA, rB
-        &call launch_tasks_, -, INIT, iA_part
-            $call region_require, rA_part, WRITE_DISCARD, X
-        &call launch_tasks_, -, INIT, iA_part
-            $call region_require, rA_part, WRITE_DISCARD, Y
-
-        $my const double alpha = drand48()
-
-        $(set:arg=alpha)
-        &call launch_tasks_, -, DAXPY, iA_part
-            $call region_require, rA_part, READ_ONLY, X, Y
-            $call region_require, rB_part, WRITE_DISCARD, Z
-
-        &call launch_tasks_, -, CHECK, iA_part
-            $call region_require, rA_part, READ_ONLY, X, Y
-            $call region_require, rB_part, READ_ONLY, Z
-
-fncode: INIT_task
-    &call task_
-        &call with_fields, :X
-            &call each_row
-                $(F:X) = drand48()
-
-fncode: DAXPY_task
-    &call task_
-        $call args, double alpha
-        &call with_fields, X, Y, Z
-            &call each_row
-                $(F:Z) = alpha * $(F:X) + $(F:Y)
-
-fncode: CHECK_task
-    b_all_passed = true
-    &call task_
-        $call args, double alpha
-        &call with_fields, X, Y, Z
-            &call each_row
-                f_expected = alpha * $(F:X) + $(F:Y)
-                f_got = $(F:Z)
-                $if f_expected != f_got
-                    $print mismatch: $f_expected != $f_got
-                    b_all_passed = false
-    $if b_all_passed
-        $print "All passed!"
-    $else
-        $print "Failed!"
-
-
-
-
+    default_n_subregions: 6

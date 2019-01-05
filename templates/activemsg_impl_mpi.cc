@@ -30,6 +30,7 @@ protected:
 
 AM_Manager g_am_manager;
 
+/*---------------------------------------------*/
 void enqueue_message(NodeID target, int msgid,
                     const void *args, size_t arg_size,
                     const void *payload, size_t payload_size,
@@ -62,7 +63,8 @@ void do_some_polling(void)
 
 size_t get_lmb_size(NodeID target_node)
 {
-return 0;
+    assert(0);
+    return 0;
 }
 
 void record_message(NodeID source, bool sent_reply)

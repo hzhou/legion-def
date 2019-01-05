@@ -36,7 +36,7 @@ fncode: AM_MPI_Init
 
 #---------------------------------------- 
 subcode: init_endpoints_mpi
-    $call @parse_command_line
+    # $call @parse_command_line
     # $call @init_srcdatapool
     # $call @add_handlers
     g_am_manager.init_corereservation(crs)
@@ -51,12 +51,10 @@ subcode: mpi_enqueue_message(payload_type)
     $global int next_outgoing_message_id = 0
     int n_args = arg_size/4;
     # $call to_debug
-    $(if:debug)
-        $print "enqueue_message %d->%d [$(payload_type)-%d] - %d %s-", my_node_id, target, payload_mode, msgid, f_get_msgid(msgid)
-        $call debug_args
-
     $(set:is_short=payload_mode==PAYLOAD_NONE)
     $call set_payload_size
+    $(if:debug)
+        $call debug_enqueue
 
     $(if:AM_ENQUEUE)
         $call am_enqueue, target, msgid, n_args, args, $(is_short), payload, payload_size
@@ -80,10 +78,17 @@ subcode: mpi_enqueue_message(payload_type)
             $my const void *payload = NULL
             assert(0 && "mpi_enqueue_message - $(payload_type) - active messages not available!");
 
+    subcode: debug_enqueue
+        $if $(is_short)
+            $print "enqueue_message %d->%d [short] - %d %s-", my_node_id, target, msgid, f_get_msgid(msgid)
+        $else
+            $print "enqueue_message %d->%d [$(payload_type)-%d-%d] - %d %s-", my_node_id, target, payload_mode, payload_size, msgid, f_get_msgid(msgid)
+        $call debug_args
+
     subcode: debug_args
         $print " - %d:-", n_args
         $for i=0:n_args
-            $print " %8x-", ((int*)args)[i]
+            # $print " %8x-", ((int*)args)[i]
         $print
 
     subcode: adjust_args

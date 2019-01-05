@@ -679,6 +679,7 @@ namespace Realm {
 #ifdef USE_GASNET
 	gasnet_get(dst_c, node, segbases[node]+(blkid * memory_stride)+blkoffset, chunk_size);
 #else
+        assert(0);
 	memcpy(dst_c, segbases[node]+(blkid * memory_stride)+blkoffset, chunk_size);
 #endif
 	offset += chunk_size;
@@ -699,6 +700,7 @@ namespace Realm {
 #ifdef USE_GASNET
 	gasnet_put(node, segbases[node]+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
 #else
+        assert(0);
 	memcpy(segbases[node]+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
 #endif
 	offset += chunk_size;
@@ -771,11 +773,13 @@ namespace Realm {
 
 	  char *src_c = (segbases[node] +
 			 (blkid * memory_stride) + blkoffset);
-#ifdef USE_GASNET
 	  if(node != my_node_id) {
+#ifdef USE_GASNET
 	    gasnet_get_nbi(dst_c, node, src_c, chunk_size);
-	  } else
+#else
+            assert(0);
 #endif
+	  } else
 	  {
 	    memcpy(dst_c, src_c, chunk_size);
 	  }
@@ -831,11 +835,13 @@ namespace Realm {
 
 	  char *dst_c = (segbases[node] +
 			 (blkid * memory_stride) + blkoffset);
-#ifdef USE_GASNET
 	  if(node != my_node_id) {
+#ifdef USE_GASNET
 	    gasnet_put_nbi(node, dst_c, (void *)src_c, chunk_size);
-	  } else
+#else
+            assert(0);
 #endif
+	  } else
 	  {
 	    memcpy(dst_c, src_c, chunk_size);
 	  }
