@@ -52,22 +52,22 @@ fncode: TOP_task
             $call region_require, rB_part, READ_ONLY, Z
 
 fncode: INIT_task
-    &call task_, INIT
+    &call task_
         &call with_fields, :X
             &call each_row
                 $(F:X) = drand48()
 
 fncode: DAXPY_task
-    $call task_arg, double alpha
-    &call task_, DAXPY
+    &call task_
+        $call args, double alpha
         &call with_fields, X, Y, Z
             &call each_row
                 $(F:Z) = alpha * $(F:X) + $(F:Y)
 
 fncode: CHECK_task
     b_all_passed = true
-    $call task_arg, double alpha
-    &call task_, CHECK
+    &call task_
+        $call args, double alpha
         &call with_fields, X, Y, Z
             &call each_row
                 f_expected = alpha * $(F:X) + $(F:Y)

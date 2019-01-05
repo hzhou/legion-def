@@ -2852,7 +2852,8 @@ extern void record_message(NodeID source, bool sent_reply)
 }
 
 #elif defined USE_MPI
-#include "activemsg_impl_mpi.cc"
+/* Compiled in with Makefile magic */
+/* #include "activemsg_impl_mpi.cc" */
 #else // defined USE_GASNET
 
 GASNetHSL::GASNetHSL(void)

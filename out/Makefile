@@ -1,3 +1,6 @@
+#---------------------------------------- 
+# This Makefile compiles with USE_MPI only
+#---------------------------------------- 
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
@@ -24,5 +27,6 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 
+REALM_SRC = $(LG_RT_DIR)/realm/activemsg_impl_mpi.cc $(LG_RT_DIR)/realm/am_mpi.cc
 include $(LG_RT_DIR)/runtime.mk
 

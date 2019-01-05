@@ -36,7 +36,7 @@ fncode: TOP_task
             n = atoi($(a))
             break
 
-fncode: fibonacci_task(): int
+fncode: fibonacci_task: int
     &call task_
         $call args, n
     $if n==0
@@ -54,7 +54,7 @@ fncode: fibonacci_task(): int
 
     return t.get_result<int>()
 
-fncode: sum_task(): int
+fncode: sum_task: int
     &call task_
         $call future_args, int a, int b
     return a+b

@@ -32,7 +32,7 @@ fncode: TOP_task
     $if b_all_passed
         $print All checks passed!
 
-fncode: worker_task(): int
+fncode: worker_task: int
     &call task_
         i = $(i_task)
         $print Hello world from task $i

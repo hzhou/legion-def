@@ -40,13 +40,13 @@ fncode: TOP_task
             $call region_require, rA, READ_ONLY, DERIV
 
 fncode: INIT_task
-    &call task_, INIT
+    &call task_
         &call with_fields, VAL
             &call each_row
                 $(F:VAL) = drand48()
 
 fncode: STENCIL_task
-    &call task_, STENCIL
+    &call task_
         &call with_fields, VAL, DERIV
             &call with_rect
                 $if $(i1)<2 || $(i2)>=n_elements-2
@@ -67,7 +67,7 @@ fncode: STENCIL_task
             acc_DERIV[*it] = (-l2+8*l1-8*r1+r2)/12
 
 fncode: CHECK_task
-    &call task_, CHECK
+    &call task_
         &call with_fields, VAL,DERIV
             $call check
 

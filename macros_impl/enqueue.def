@@ -4,6 +4,8 @@ macros:
 macros:
     mutex: mutex_ammpi
     queue: queue_ammpi
+    # Insufficient: need memcpy args, payload to ensure local complete
+    # Or: enqueu wait until msg sent before return
     AM_params: i_target, msgid, n_args, args, is_short, payload, payload_size
 
 subcode:: _autoload

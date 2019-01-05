@@ -1,12 +1,8 @@
-include: macros_ammpi/am_mpi.def
-include: macros_impl/enqueue.def
-
 include: macros_impl/hsl.def
 include: macros_impl/util.def
 
 macros:
-    debug: 1
-    node_this: my_node_id
+    # debug: 1
 
 #---------------------------------------- 
 page: activemsg_impl_mpi.cc
@@ -14,15 +10,20 @@ page: activemsg_impl_mpi.cc
     module: cpp
     USE_MPI: 1
 
-    $include mpi
-    $(if:0)
-        $typedef int gasnet_node_t
-        $typedef int32_t gasnet_handlerarg_t
-        $typedef int token_t
+    $include "am_mpi.h"
+    $include <pthread.h>
+    $include <mpi.h>
+    NEWLINE
+    #define GASNETHSL_IMPL     pthread_mutex_t mutex
+    #define GASNETCONDVAR_IMPL pthread_cond_t  condvar
+    #include "realm/activemsg.h"
+    $(for:cmdline,threads,timers,logging)
+        #include "realm/$1.h"
+    NEWLINE
+
     $call HSL_impl, pthread
-    # $template templates/activemsg_impl_gasnet.cc
+
     $list AM_MPI_Init
-    $call list_AMs
     $template templates/activemsg_impl_mpi.cc
 
 fncode: AM_MPI_Init
@@ -73,6 +74,7 @@ subcode: mpi_enqueue_message(payload_type)
         $if $(is_short)
             AM_short_n(n_args, target, msgid, $(args))
         $else
+            $call adjust_args
             AM_medium_n(n_args, target, msgid, payload,payload_size, $(args))
 
     subcode: set_payload_size
@@ -89,6 +91,18 @@ subcode: mpi_enqueue_message(payload_type)
         $for i=0:n_args
             $print " %8x-", ((int*)args)[i]
         $print
+
+    subcode: adjust_args
+        $my int* tp_args = (int*)(args)
+        $if tp_args[0]==BaseMedium::MESSAGE_ID_MAGIC
+            NOOP
+        $else
+            assert(tp_args[2]==BaseMedium::MESSAGE_ID_MAGIC)
+            tp_args += 2
+        tp_args[0] = next_outgoing_message_id++
+        tp_args[1] = 1
+        tp_args[2] = 0
+        tp_args[3] = 0
 
 subcode: mpi_thread_loop
     $while true
@@ -123,9 +137,6 @@ subcode: mpi_adjust_long_msgsize
 subcode: mpi_record_message
     $(if:debug)
         $print "mpi_record_message %d", sent_reply
-
-macros:
-    AM_POLL: thread
 
 subcode: mpi_start_polling_threads
     $(if:debug)
