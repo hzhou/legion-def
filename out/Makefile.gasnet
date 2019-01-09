@@ -6,8 +6,11 @@ GASNET = $(HOME)/OTHER
 CONDUIT = smp
 
 # Flags for directing the runtime makefile what to include
+Can't open perl script "/home/hzhou/projects/vim_filters/out/vim_filter.pl": No such file or directory
 DEBUG           ?= 1		# Include debugging symbols
+Can't open perl script "/home/hzhou/projects/vim_filters/out/vim_filter.pl": No such file or directory
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+Can't open perl script "/home/hzhou/projects/vim_filters/out/vim_filter.pl": No such file or directory
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 1		# Include GASNet support (requires GASNet)
 USE_MPI         ?= 0            # Include MPI support
@@ -24,8 +27,9 @@ GEN_GPU_SRC	?=				# .cu files
 INC_FLAGS	?= -I$(GASNET)/include/smp-conduit
 CC_FLAGS	?= -std=c++11 -Wformat=0
 NVCC_FLAGS	?=
-GASNET_FLAGS	?=
-LD_FLAGS	?= -lgasnet-smp-par
+GASNET_FLAGS	?= -lgasnet-smp-par
+Can't open perl script "/home/hzhou/projects/vim_filters/out/vim_filter.pl": No such file or directory
+LD_FLAGS	?=
 
 include $(LG_RT_DIR)/runtime.mk
 

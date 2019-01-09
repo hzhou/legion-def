@@ -1083,7 +1083,7 @@ namespace Realm {
       }
 #endif
 #elif defined USE_MPI
-    $call network_init_mpi
+    $call mpi_network_init
 #endif
 
       // TODO: this is here to match old behavior, but it'd probably be
@@ -1169,6 +1169,8 @@ namespace Realm {
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;
       size_t reg_ib_mem_size_in_mb = 256;
+#elif defined USE_MPI
+      $call mpi_configure_mem
 #else
       size_t gasnet_mem_size_in_mb = 0;
       size_t reg_ib_mem_size_in_mb = 64; // for transposes/serdez
@@ -1491,6 +1493,8 @@ namespace Realm {
 	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
 	char *regmem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20);
 	delete[] seginfos;
+#elif defined USE_MPI
+    $call mpi_init_regmem_base
 #else
 	nongasnet_regmem_base = malloc(reg_mem_size_in_mb << 20);
 	assert(nongasnet_regmem_base != 0);
@@ -1520,6 +1524,8 @@ namespace Realm {
 	char *reg_ib_mem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20)
                                 + (reg_mem_size_in_mb << 20);
 	delete[] seginfos;
+#elif defined USE_MPI
+    $call mpi_init_reg_ib_mem_base
 #else
 	nongasnet_reg_ib_mem_base = malloc(reg_ib_mem_size_in_mb << 20);
 	assert(nongasnet_reg_ib_mem_base != 0);

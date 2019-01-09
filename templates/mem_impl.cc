@@ -33,6 +33,8 @@ static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gas
 #ifdef _INCLUDED_GASNET_TOOLS_H
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 #endif
+#elif defined USE_MPI
+DUMP_STUB global_init
 #endif
 
 #define CHECK_GASNET(cmd) do { \
@@ -630,6 +632,8 @@ namespace Realm {
 	segbases[i] = (char *)(seginfos[i].addr);
       }
       delete[] seginfos;
+#elif defined USE_MPI
+    $call mpi_init_segbases
 #else
       for(int i = 0; i < num_nodes; i++) {
 	segbases[i] = (char *)(malloc(size_per_node));

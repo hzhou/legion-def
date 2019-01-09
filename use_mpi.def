@@ -17,29 +17,18 @@ page: activemsg_impl_mpi.cc
         $include "realm/$1.h"
     NEWLINE
 
-    $list AM_MPI_Init
     $template templates/activemsg_impl_mpi.cc
-
-fncode: AM_MPI_Init
-    $(if:0)
-        MPI_Init(NULL, NULL)
-    $(else)
-        $my int mpi_thread_model
-        MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model)
-        assert(mpi_thread_model==MPI_THREAD_MULTIPLE)
-    MPI_Comm_size(MPI_COMM_WORLD, &max_node_id)
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_node_id)
-    $(if:debug)
-        $print "network_init_mpi: %d/%d", my_node_id, max_node_id
-    max_node_id--
-    $call @on_am_init
 
 #---------------------------------------- 
 subcode: init_endpoints_mpi
     # $call @parse_command_line
-    # $call @init_srcdatapool
-    # $call @add_handlers
+    $call @init_am_segments
     g_am_manager.init_corereservation(crs)
+
+    subcode: init_am_segments
+        $(set:M=(((size_t)$1_mem_size_in_mb)<<20))
+        $my size_t attach_size = $(M:gasnet)+$(M:registered)+$(M:registered_ib)
+         AM_Init_segments(attach_size)   
 
 subcode: mpi_add_handler_entry # msgid, fnptr
     $list f_get_msgid
@@ -47,6 +36,7 @@ subcode: mpi_add_handler_entry # msgid, fnptr
         $print "mpi_add_handler_entry: %d - %s", msgid, f_get_msgid(msgid)
     AM_add_handler(msgid, fnptr)
 
+include: c/backtrace.def
 subcode: mpi_enqueue_message(payload_type)
     $global int next_outgoing_message_id = 0
     int n_args = arg_size/4;
@@ -55,6 +45,10 @@ subcode: mpi_enqueue_message(payload_type)
     $call set_payload_size
     $(if:debug)
         $call debug_enqueue
+        $if msgid==REMOTE_COPY_MSGID
+            # $call to_debug
+            print_trace()
+    # $call debug_custom
 
     $(if:AM_ENQUEUE)
         $call am_enqueue, target, msgid, n_args, args, $(is_short), payload, payload_size
@@ -67,7 +61,16 @@ subcode: mpi_enqueue_message(payload_type)
             AM_short_n(n_args, target, msgid, $(args))
         $else
             $call adjust_args
-            AM_medium_n(n_args, target, msgid, payload,payload_size, $(args))
+            # $call debug_142
+            $if !dstptr
+                AM_medium_n(n_args, target, msgid, payload,payload_size, $(args))
+            $else
+                AM_long_n(n_args, target, msgid, payload,payload_size, dstptr, $(args))
+
+        subcode: debug_142
+            $if msgid==142 && payload_size>0
+                $(set:P=((int*)payload)[$1])
+                $print "%d->%d PAYLOAD_COPY %d [%d]: %08x %08x...", my_node_id, target, msgid, payload_size, $(P:0), $(P:1)
 
     subcode: set_payload_size
         $(if:payload_type=ContiguousPayload)
@@ -77,6 +80,18 @@ subcode: mpi_enqueue_message(payload_type)
         $(else)
             $my const void *payload = NULL
             assert(0 && "mpi_enqueue_message - $(payload_type) - active messages not available!");
+
+    subcode: adjust_args
+        $my int* tp_args = (int*)(args)
+        $if tp_args[0]==BaseMedium::MESSAGE_ID_MAGIC
+            NOOP
+        $else
+            assert(tp_args[2]==BaseMedium::MESSAGE_ID_MAGIC)
+            tp_args += 2
+        tp_args[0] = next_outgoing_message_id++
+        tp_args[1] = 1
+        tp_args[2] = 0
+        tp_args[3] = 0
 
     subcode: debug_enqueue
         $if $(is_short)
@@ -91,17 +106,9 @@ subcode: mpi_enqueue_message(payload_type)
             # $print " %8x-", ((int*)args)[i]
         $print
 
-    subcode: adjust_args
-        $my int* tp_args = (int*)(args)
-        $if tp_args[0]==BaseMedium::MESSAGE_ID_MAGIC
-            NOOP
-        $else
-            assert(tp_args[2]==BaseMedium::MESSAGE_ID_MAGIC)
-            tp_args += 2
-        tp_args[0] = next_outgoing_message_id++
-        tp_args[1] = 1
-        tp_args[2] = 0
-        tp_args[3] = 0
+    subcode: debug_custom
+        $if !($(is_short))
+            $print "enqueue_message %d->%d [$(payload_type)-%s] - size %d - %d %s", my_node_id, target, f_get_payload_mode(payload_mode), payload_size, msgid, f_get_msgid(msgid)
 
 subcode: mpi_thread_loop
     $while true
@@ -157,10 +164,17 @@ subcode: mpi_stop_activemsg_threads
 macros:
     # 64 msgid: 140-204
     msgid_list: NODE_ANNOUNCE_MSGID, SPAWN_TASK_MSGID, LOCK_REQUEST_MSGID, LOCK_RELEASE_MSGID, LOCK_GRANT_MSGID, EVENT_SUBSCRIBE_MSGID, EVENT_TRIGGER_MSGID, EVENT_UPDATE_MSGID, REMOTE_MALLOC_MSGID, REMOTE_MALLOC_RPLID, CREATE_ALLOC_MSGID, CREATE_ALLOC_RPLID, CREATE_INST_MSGID, CREATE_INST_RPLID, VALID_MASK_REQ_MSGID, VALID_MASK_DATA_MSGID, VALID_MASK_FTH_MSGID, ROLL_UP_TIMER_MSGID, ROLL_UP_DATA_MSGID, CLEAR_TIMER_MSGID, DESTROY_INST_MSGID, REMOTE_WRITE_MSGID, REMOTE_REDUCE_MSGID, REMOTE_SERDEZ_MSGID, REMOTE_WRITE_FENCE_MSGID, REMOTE_WRITE_FENCE_ACK_MSGID, DESTROY_LOCK_MSGID, REMOTE_REDLIST_MSGID, MACHINE_SHUTDOWN_MSGID, BARRIER_ADJUST_MSGID, BARRIER_SUBSCRIBE_MSGID, BARRIER_TRIGGER_MSGID, BARRIER_MIGRATE_MSGID, METADATA_REQUEST_MSGID, METADATA_RESPONSE_MSGID, METADATA_INVALIDATE_MSGID, METADATA_INVALIDATE_ACK_MSGID, XFERDES_REMOTEWRITE_MSGID, XFERDES_REMOTEWRITE_ACK_MSGID, XFERDES_CREATE_MSGID, XFERDES_DESTROY_MSGID, XFERDES_NOTIFY_COMPLETION_MSGID, XFERDES_UPDATE_BYTES_WRITE_MSGID, XFERDES_UPDATE_BYTES_READ_MSGID, REGISTER_TASK_MSGID, REGISTER_TASK_COMPLETE_MSGID, REMOTE_MICROOP_MSGID, REMOTE_MICROOP_COMPLETE_MSGID, REMOTE_SPARSITY_CONTRIB_MSGID, REMOTE_SPARSITY_REQUEST_MSGID, APPROX_IMAGE_RESPONSE_MSGID, SET_CONTRIB_COUNT_MSGID, REMOTE_ID_REQUEST_MSGID, REMOTE_ID_RESPONSE_MSGID, REMOTE_IB_ALLOC_REQUEST_MSGID, REMOTE_IB_ALLOC_RESPONSE_MSGID, REMOTE_IB_FREE_REQUEST_MSGID, REMOTE_COPY_MSGID, REMOTE_FILL_MSGID, MEM_STORAGE_ALLOC_REQ_MSGID, MEM_STORAGE_ALLOC_RESP_MSGID, MEM_STORAGE_RELEASE_REQ_MSGID, MEM_STORAGE_RELEASE_RESP_MSGID
+    payload_list: PAYLOAD_NONE, PAYLOAD_KEEP, PAYLOAD_FREE, PAYLOAD_COPY, PAYLOAD_SRCPTR, PAYLOAD_PENDING, PAYLOAD_KEEPREG, PAYLOAD_EMPTY
 
 fncode: f_get_msgid(int id): const char*
     $switch id
         $(for:$(msgid_list))
+            case $1: return "$1"
+    return NULL
+
+fncode: f_get_payload_mode(int id): const char*
+    $switch id
+        $(for:$(payload_list))
             case $1: return "$1"
     return NULL
 

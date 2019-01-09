@@ -2,7 +2,7 @@ include: macros/legion.def
 
 page: main.cc, legion_frame
     module: cpp
-    # run: cd out && make && ./main
+    # run: cd out && make -f Makefile.gasnet -j8 && GASNET_PSHM_NODES=3 ./main -ll:cpu 2
     run: cd out && make -j8 && mpirun -n 3 ./main -ll:cpu 2
 
     $map register_task, TOP, INIT, STENCIL, CHECK
@@ -46,6 +46,9 @@ fncode: INIT_task
             &call each_row
                 $(F:VAL) = drand48()
 
+macros:
+    formula: (-l2+8*l1-8*r1+r2)/12
+
 fncode: STENCIL_task
     &call task_
         &call with_fields, VAL, DERIV
@@ -56,17 +59,21 @@ fncode: STENCIL_task
                 $else
                     $call stencil_fast
     subcode: stencil_slow
-        $print "Running slow stencil path for point %d...", $(i_task)
+        $print "Running slow stencil path for point %lld...", $(i_task)
         &call each_row
             $call set_l1_l2_r1_r2
-            $(F:DERIV) = (-l2+8*l1-8*r1+r2)/12
+            $(F:DERIV) = $(formula)
     subcode: stencil_fast
-        $print "Running fast stencil path for point %d...", $(i_task)
+        $print "Running fast stencil path for point %lld...", $(i_task)
         &call each_row
             $my  l1,l2,r1,r2: double
             $(for:l1,l2,r1,r2 and -1,-2,+1,+2)
                 $1 = acc_VAL[*it $2]
-            $(F:DERIV) = (-l2+8*l1-8*r1+r2)/12
+            $(F:DERIV) = $(formula)
+            $my double t = $(formula)
+            $(for:510-514)
+                $if (*it)==$1
+                    $print "[%lld] $1: ($l2,$l1,$r1,$r2) -> $t", $(i_task)
 
 fncode: CHECK_task
     &call task_
@@ -77,10 +84,13 @@ fncode: CHECK_task
         b_all_passed = true
         &call each_row
             $call set_l1_l2_r1_r2
-            f_expected = (-l2+8*l1-8*r1+r2)/12
+            f_expected = $(formula)
             f_got = $(F:DERIV)
+            $(for:510-514)
+                $if (*it)==$1
+                    $print "[%lld] $1: ($l2,$l1,$r1,$r2) -> $f_expected <=> $f_got", $(i_task)
             $if f_expected != f_got
-                $print "mismatch[%d]: $f_expected != $f_got", (*it+0)
+                $print "mismatch[%lld]: $f_expected != $f_got", (*it+0)
                 b_all_passed = false
     $if b_all_passed
         $print "All passed!"

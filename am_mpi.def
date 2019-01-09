@@ -11,10 +11,34 @@ page: am_mpi.cc
     # debug: 1
 
     $include <mpi.h>
+    $list AM_Init, AM_Init_segments
     $list AM_add_handler
-    $list AMPoll, AM_short_n, AM_medium_n
+    $list AMPoll, AM_short_n, AM_medium_n, AM_long_n
     $call list_AMs
 
 subcode: _autoload
     $(setmacro:node_this=my_node_id)
     extern int my_node_id;
+
+subcode: set_am_msg_tag
+    $include <atomic>
+    $global std::atomic_uint msg_seq
+    msg_seq++
+    msg_tag = msg_seq << 1
+
+#---------------------------------------- 
+fncode: AM_Init(int *p_node_this, int *p_node_size)
+    $(if:0)
+        MPI_Init(NULL, NULL)
+    $(else)
+        $my int mpi_thread_model
+        MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model)
+        assert(mpi_thread_model==MPI_THREAD_MULTIPLE)
+    MPI_Comm_size(MPI_COMM_WORLD, p_node_size)
+    MPI_Comm_rank(MPI_COMM_WORLD, p_node_this)
+    $(if:debug)
+        $print "network_init_mpi: %d/%d", *p_node_this, *p_node_size
+
+fncode: AM_Init_segments(std::size_t size)
+    $call am_init_win, size
+
