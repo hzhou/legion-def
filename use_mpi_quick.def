@@ -34,6 +34,7 @@ page: runtime_impl.cc, from templates/runtime_impl.cc
     subcode: mpi_init_reg_ib_mem_base
 	char *reg_ib_mem_base = (char *)g_am_base + (gasnet_mem_size_in_mb << 20) + (reg_mem_size_in_mb << 20);
 
+
 page: mem_impl.h, from templates/mem_impl.h
     module: cpp
     output_dir: ./realm_src
@@ -45,14 +46,46 @@ page: mem_impl.cc, from templates/mem_impl.cc
     $include <mpi.h>
     $include "realm/am_mpi.h"
 
-    # RDMA
-    # gasnet_get()
-
     subcode: mpi_init_segbases
         $global extern void * g_am_base
         $global extern void ** g_am_bases
+        $global extern MPI_Win g_am_win
         $for i=0:num_nodes
             segbases[i] = (char *) g_am_bases[i]
+    # --------------
+    subcode: lock_epoch
+        MPI_Win_lock(MPI_LOCK_SHARED, $(target), 0, g_am_win)
+        BLOCK
+        MPI_Win_unlock($(target), g_am_win)
+
+    subcode: mpi_get
+        # assert(0 && "no remote get_bytes without GASNET");
+        $(set:target=ID(me).memory.owner_node)
+        void *srcptr = ((char *)regbase) + offset - (size_t) g_am_base;
+        # gasnet_get(dst, ID(me).memory.owner_node, srcptr, size);
+        &call lock_epoch
+            MPI_Get(dst, size, MPI_BYTE, $(target), (MPI_Aint)srcptr, size, MPI_BYTE, g_am_win)
+    subcode: mpi_get_bytes
+        $(set:target=node)
+        $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
+        &call lock_epoch
+            MPI_Get(dst_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
+    subcode: mpi_put_bytes
+        $(set:target=node)
+        $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
+        &call lock_epoch
+            MPI_Put(src_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
+    # --------------
+    subcode: mpi_nbi_begin
+        MPI_Win_lock_all(0, g_am_win)
+    subcode: mpi_nbi_end
+        MPI_Win_unlock_all(g_am_win)
+    subcode: mpi_nbi_put
+        $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
+        MPI_Put(src_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)
+    subcode: mpi_nbi_get
+        $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
+        MPI_Get(dst_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)
 
 # page: activemsg.h, from templates/activemsg.h
 page: activemsg.cc, from templates/activemsg.cc
