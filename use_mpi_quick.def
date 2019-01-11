@@ -21,7 +21,7 @@ page: runtime_impl.cc, from templates/runtime_impl.cc
     subcode: mpi_network_init
         $my int node_size
         AM_Init(&my_node_id, &node_size);
-        $print "mpi_network_init %d/%d", my_node_id, node_size
+        # $print "mpi_network_init %d/%d", my_node_id, node_size
         max_node_id = node_size-1
 
     # ::configure_from_command_line
@@ -34,7 +34,10 @@ page: runtime_impl.cc, from templates/runtime_impl.cc
     subcode: mpi_init_reg_ib_mem_base
 	char *reg_ib_mem_base = (char *)g_am_base + (gasnet_mem_size_in_mb << 20) + (reg_mem_size_in_mb << 20);
 
-# page: mem_impl.h, from templates/mem_impl.h
+page: mem_impl.h, from templates/mem_impl.h
+    module: cpp
+    output_dir: ./realm_src
+
 page: mem_impl.cc, from templates/mem_impl.cc
     module: cpp
     output_dir: ./realm_src
@@ -47,9 +50,9 @@ page: mem_impl.cc, from templates/mem_impl.cc
 
     subcode: mpi_init_segbases
         $global extern void * g_am_base
+        $global extern void ** g_am_bases
         $for i=0:num_nodes
-            segbases[i] = (char *) 0
-        segbases[my_node_id] = (char *)g_am_base
+            segbases[i] = (char *) g_am_bases[i]
 
 # page: activemsg.h, from templates/activemsg.h
 page: activemsg.cc, from templates/activemsg.cc

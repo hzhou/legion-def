@@ -22,13 +22,13 @@ page: activemsg_impl_mpi.cc
 #---------------------------------------- 
 subcode: init_endpoints_mpi
     # $call @parse_command_line
-    $call @init_am_segments
+    $call init_am_segments
     g_am_manager.init_corereservation(crs)
 
     subcode: init_am_segments
         $(set:M=(((size_t)$1_mem_size_in_mb)<<20))
         $my size_t attach_size = $(M:gasnet)+$(M:registered)+$(M:registered_ib)
-         AM_Init_segments(attach_size)   
+        AM_Init_segments(attach_size)   
 
 subcode: mpi_add_handler_entry # msgid, fnptr
     $list f_get_msgid
@@ -65,6 +65,8 @@ subcode: mpi_enqueue_message(payload_type)
             $if !dstptr
                 AM_medium_n(n_args, target, msgid, payload,payload_size, $(args))
             $else
+                $global extern void ** g_am_bases
+                dstptr -= (size_t)g_am_bases[target]
                 AM_long_n(n_args, target, msgid, payload,payload_size, dstptr, $(args))
 
         subcode: debug_142

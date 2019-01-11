@@ -70,10 +70,6 @@ fncode: STENCIL_task
             $(for:l1,l2,r1,r2 and -1,-2,+1,+2)
                 $1 = acc_VAL[*it $2]
             $(F:DERIV) = $(formula)
-            $my double t = $(formula)
-            $(for:510-514)
-                $if (*it)==$1
-                    $print "[%lld] $1: ($l2,$l1,$r1,$r2) -> $t", $(i_task)
 
 fncode: CHECK_task
     &call task_
@@ -86,9 +82,6 @@ fncode: CHECK_task
             $call set_l1_l2_r1_r2
             f_expected = $(formula)
             f_got = $(F:DERIV)
-            $(for:510-514)
-                $if (*it)==$1
-                    $print "[%lld] $1: ($l2,$l1,$r1,$r2) -> $f_expected <=> $f_got", $(i_task)
             $if f_expected != f_got
                 $print "mismatch[%lld]: $f_expected != $f_got", (*it+0)
                 b_all_passed = false

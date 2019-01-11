@@ -3,12 +3,12 @@ include: macros_ammpi/am_mpi.def
 
 macros:
     AM_POLL: thread
+    # debug: 1
 
 page: am_mpi.cc
     output_dir: ./realm_src
     module: cpp
     dump_h: am_mpi.h
-    # debug: 1
 
     $include <mpi.h>
     $list AM_Init, AM_Init_segments
@@ -34,8 +34,11 @@ fncode: AM_Init(int *p_node_this, int *p_node_size)
         $my int mpi_thread_model
         MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model)
         assert(mpi_thread_model==MPI_THREAD_MULTIPLE)
-    MPI_Comm_size(MPI_COMM_WORLD, p_node_size)
-    MPI_Comm_rank(MPI_COMM_WORLD, p_node_this)
+    $global int node_size, int node_this
+    MPI_Comm_size(MPI_COMM_WORLD, &node_size)
+    MPI_Comm_rank(MPI_COMM_WORLD, &node_this)
+    *p_node_size = node_size
+    *p_node_this = node_this
     $(if:debug)
         $print "network_init_mpi: %d/%d", *p_node_this, *p_node_size
 
