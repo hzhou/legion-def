@@ -1,0 +1,25 @@
+page: t
+    module: perl
+    output_dir: /tmp
+
+    chdir "$ENV{HOME}/work/LEGION/legion-gitlab/examples/circuit" or die "chdir\n"
+    $(if:1)
+        my $cmd="mpirun -n 2 ./circuit.mpi -p 100"
+    $(else)
+        $ENV{GASNET_PSHM_NODES}=2
+        my $cmd = "./circuit.gasnet -p 100"
+
+    my ($sum, $sum2)
+    my $n = 50
+    $for $i=0:$n
+        my $t = `$cmd`
+        $if $t=~/GFLOPS\s*=\s*(\S+)\s*GFLOPS/
+            $sum+=$1
+            $sum2 += $1*$1
+        $print $i -
+    $sum /= $n
+    $sum2 /= $n
+    my $dev = sqrt($sum2 - $sum**2)
+    $print $n rounds, avg $sum GFLOPS, dev $dev
+
+
