@@ -63,8 +63,9 @@ void do_some_polling(void)
 
 size_t get_lmb_size(NodeID target_node)
 {
-    assert(0);
-    return 0;
+    // lmb: Long Message Buffer - threshold for breaking up long messages
+    // MPI is handling long messages, so we are not breaking it up.
+    return std::numeric_limits<size_t>::max();
 }
 
 void record_message(NodeID source, bool sent_reply)

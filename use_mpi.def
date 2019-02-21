@@ -12,6 +12,7 @@ page: activemsg_impl_mpi.cc
 
     $include "am_mpi.h"
     $include <mpi.h>
+    $include <limits>
     NEWLINE
     $(for:activemsg, cmdline,threads,timers,logging)
         $include "realm/$1.h"
@@ -119,6 +120,8 @@ subcode: mpi_thread_loop
         $(if:AM_ENQUEUE)
             $call am_dequeue
         AMPoll();
+    # TODO: How to cleanup seems messier than I thought
+    AM_Finalize();
 
 # called in machine_impl.cc - await_all_annoucements
 subcode: mpi_do_some_polling

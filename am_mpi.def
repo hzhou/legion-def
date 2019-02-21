@@ -11,9 +11,9 @@ page: am_mpi.cc
     dump_h: am_mpi.h
 
     $include <mpi.h>
-    $list AM_Init, AM_Init_segments
+    $list AM_Init, AM_Init_segments, AM_Finalize
     $list AM_add_handler
-    $list AMPoll, AM_short_n, AM_medium_n, AM_long_n
+    $list AMPoll, AMPoll_cancel, AM_short_n, AM_medium_n, AM_long_n
     $call list_AMs
 
 subcode: _autoload
@@ -21,10 +21,23 @@ subcode: _autoload
     extern int my_node_id;
 
 subcode: set_am_msg_tag
-    $include <atomic>
-    $global std::atomic_uint msg_seq
-    msg_seq++
-    msg_tag = msg_seq << 1
+    $(if:0)
+        $include <atomic>
+        $global std::atomic_uint msg_seq
+        msg_seq++
+        msg_tag = ((msg_seq & 0x3fff) << 1)
+        $if msg_tag==10
+            $print $$(node_this) msg_tag: $msg_tag
+    $(else)
+        $include <thread>
+        $global thread_local int thread_id=0
+
+        $include <atomic>
+        $global std::atomic_uint num_threads
+        $if thread_id==0
+            num_threads++
+            thread_id = num_threads
+        msg_tag = (thread_id<<1)
 
 #---------------------------------------- 
 fncode: AM_Init(int *p_node_this, int *p_node_size)
@@ -42,6 +55,17 @@ fncode: AM_Init(int *p_node_this, int *p_node_size)
     $(if:debug)
         $print "network_init_mpi: %d/%d", *p_node_this, *p_node_size
 
-fncode: AM_Init_segments(std::size_t size)
+    $(if:0)
+        $global int tag_ub = 0
+        $my int flag =0
+        MPI_Comm_get_attr($(comm), MPI_TAG_UB, &tag_ub, &flag)
+        $print "tag UB: %x - $flag", tag_ub
+
+fncode: AM_Init_segments(size_t size)
+    $include <cstddef>
     $call am_init_win, size
 
+fncode: AM_Finalize
+    $call am_finalize
+
+#---------------------------------------- 

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,9 +48,8 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 
 #elif defined USE_MPI
 DUMP_STUB global_init
-#endif
 
-#ifndef USE_GASNET
+#else
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
 #endif
@@ -1256,13 +1255,6 @@ namespace Realm {
 #endif
 
       // Check that we have enough resources for the number of nodes we are using
-      if (max_node_id >= MAX_NUM_NODES)
-      {
-        fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
-                       "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
-                       "in legion_config.h", max_node_id+1, MAX_NUM_NODES);
-        exit(1);
-      }
       if (max_node_id > (NodeID)(ID::MAX_NODE_ID))
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
@@ -1351,6 +1343,7 @@ namespace Realm {
       MemStorageAllocResponse::Message::add_handler_entries("Memory Storage Alloc Response");
       MemStorageReleaseRequest::Message::add_handler_entries("Memory Storage Release Request");
       MemStorageReleaseResponse::Message::add_handler_entries("Memory Storage Release Response");
+      CancelOperationMessage::Message::add_handler_entries("Cancel Operation AM");
       //TestMessage::add_handler_entries("Test AM");
       //TestMessage2::add_handler_entries("Test 2 AM");
 
