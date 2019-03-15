@@ -54,9 +54,9 @@ page: mem_impl.cc, from templates/mem_impl.cc
             segbases[i] = (char *) g_am_bases[i]
     # --------------
     subcode: lock_epoch
-        MPI_Win_lock(MPI_LOCK_SHARED, $(target), 0, g_am_win)
+        $MPI Win_lock(MPI_LOCK_SHARED, $(target), 0, g_am_win)
         BLOCK
-        MPI_Win_unlock($(target), g_am_win)
+        $MPI Win_unlock($(target), g_am_win)
 
     subcode: mpi_get
         # assert(0 && "no remote get_bytes without GASNET");
@@ -64,28 +64,28 @@ page: mem_impl.cc, from templates/mem_impl.cc
         void *srcptr = ((char *)regbase) + offset - (size_t) g_am_base;
         # gasnet_get(dst, ID(me).memory.owner_node, srcptr, size);
         &call lock_epoch
-            MPI_Get(dst, size, MPI_BYTE, $(target), (MPI_Aint)srcptr, size, MPI_BYTE, g_am_win)
+            $MPI Get(dst, size, MPI_BYTE, $(target), (MPI_Aint)srcptr, size, MPI_BYTE, g_am_win)
     subcode: mpi_get_bytes
         $(set:target=node)
         $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
         &call lock_epoch
-            MPI_Get(dst_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
+            $MPI Get(dst_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
     subcode: mpi_put_bytes
         $(set:target=node)
         $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
         &call lock_epoch
-            MPI_Put(src_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
+            $MPI Put(src_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
     # --------------
     subcode: mpi_nbi_begin
-        MPI_Win_lock_all(0, g_am_win)
+        $MPI Win_lock_all(0, g_am_win)
     subcode: mpi_nbi_end
-        MPI_Win_unlock_all(g_am_win)
+        $MPI Win_unlock_all(g_am_win)
     subcode: mpi_nbi_put
         $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
-        MPI_Put(src_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)
+        $MPI Put(src_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)
     subcode: mpi_nbi_get
         $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
-        MPI_Get(dst_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)
+        $MPI Get(dst_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)
 
 # page: activemsg.h, from templates/activemsg.h
 page: activemsg.cc, from templates/activemsg.cc
@@ -97,11 +97,11 @@ page: activemsg.cc, from templates/activemsg.cc
 
 subcode: mpi_gather_all_events(event)
     $(set:buf=$1, sizeof(Event), MPI_BYTE)
-    MPI_Gather($(buf:&$(event)), $(buf:all_events), root, $(comm))
+    $MPI Gather($(buf:&$(event)), $(buf:all_events), root, $(comm))
 
 subcode: mpi_bcast_event(event)
     $(set:buf=$1, sizeof(Event), MPI_BYTE)
-    MPI_Bcast($(buf:&$(event)), root, $(comm))
+    $MPI Bcast($(buf:&$(event)), root, $(comm))
 
 #---------------------------------------- 
 subcode: mpi_collective_spawn
@@ -253,5 +253,20 @@ template: collective_merged_finish_nonroot
 #---------------------------------------- 
 #---- RuntimeImpl::wait_for_shutdown
 subcode: mpi_shutdown_barrier
-    MPI_Barrier($(comm));
+    $MPI Barrier($(comm));
 
+#---------------------------------------- 
+subcode:1 _autoload
+    $plugin MPI
+    $include <thread>
+    $global extern pthread_mutex_t am_mutex
+
+subcode: MPI(@args)
+    $local int ret
+    &call am_lock
+        MPI_$(args)
+
+subcode: am_lock
+    pthread_mutex_lock(&am_mutex)
+    BLOCK
+    pthread_mutex_unlock(&am_mutex)

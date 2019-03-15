@@ -37,7 +37,7 @@ subcode: mpi_add_handler_entry # msgid, fnptr
         $print "mpi_add_handler_entry: %d - %s", msgid, f_get_msgid(msgid)
     AM_add_handler(msgid, fnptr)
 
-include: c/backtrace.def
+# include: c/backtrace.def
 subcode: mpi_enqueue_message(payload_type)
     $global int next_outgoing_message_id = 0
     int n_args = arg_size/4;
@@ -46,9 +46,6 @@ subcode: mpi_enqueue_message(payload_type)
     $call set_payload_size
     $(if:debug)
         $call debug_enqueue
-        $if msgid==REMOTE_COPY_MSGID
-            # $call to_debug
-            print_trace()
     # $call debug_custom
 
     $(if:AM_ENQUEUE)
@@ -62,18 +59,12 @@ subcode: mpi_enqueue_message(payload_type)
             AM_short_n(n_args, target, msgid, $(args))
         $else
             $call adjust_args
-            # $call debug_142
             $if !dstptr
                 AM_medium_n(n_args, target, msgid, payload,payload_size, $(args))
             $else
                 $global extern void ** g_am_bases
-                dstptr -= (size_t)g_am_bases[target]
+                dstptr = (char*)dstptr - (size_t)g_am_bases[target]
                 AM_long_n(n_args, target, msgid, payload,payload_size, dstptr, $(args))
-
-        subcode: debug_142
-            $if msgid==142 && payload_size>0
-                $(set:P=((int*)payload)[$1])
-                $print "%d->%d PAYLOAD_COPY %d [%d]: %08x %08x...", my_node_id, target, msgid, payload_size, $(P:0), $(P:1)
 
     subcode: set_payload_size
         $(if:payload_type=ContiguousPayload)

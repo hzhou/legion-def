@@ -4,6 +4,7 @@ include: macros_ammpi/am_mpi.def
 macros:
     AM_POLL: thread
     # debug: 1
+    # stat: 1
 
 page: am_mpi.cc
     output_dir: ./realm_src
@@ -20,6 +21,7 @@ subcode: _autoload
     $(setmacro:node_this=my_node_id)
     extern int my_node_id;
 
+#---------------------------------------- 
 subcode: set_am_msg_tag
     $(if:0)
         $include <atomic>
@@ -29,20 +31,71 @@ subcode: set_am_msg_tag
         $if msg_tag==10
             $print $$(node_this) msg_tag: $msg_tag
     $(else)
-        $include <thread>
-        $global thread_local int thread_id=0
-
-        $include <atomic>
-        $global std::atomic_uint num_threads
-        $if thread_id==0
-            num_threads++
-            thread_id = num_threads
         msg_tag = (thread_id<<1)
 
+subcode:: _autoload
+    $include <thread>
+    $global thread_local int thread_id=0
+
+    $include <atomic>
+    $global std::atomic_uint num_threads
+
+subcode:: on_am_send(which)
+    $if thread_id==0
+        num_threads++
+        thread_id = num_threads
+
+/*
+subcode:: on_am_send(which)
+    $global int thread_stat[10]
+    $if thread_id<10
+        thread_stat[thread_id]++
+
+subcode:: on_am_finalize
+    $print "[%d] thread msg stats: $(join:* %d:, :0-9)", $(node_this), $(join:thread_stat[*]:, :0-9)
+*/
+# -----
+subcode: _autoload
+    $(if:stat)
+        $register_prefix(count) std::atomic_uint
+        $global count_short, count_medium, count_long
+
+subcode:: on_am(which)
+    $(if:stat)
+        count_$(which)++
+
+subcode:: on_am_finalize
+    $(if:stat)
+        $print "[%d] short: %d, medium: %d, long: %d", $(node_this), count_short+0, count_medium+0, count_long+0
+
 #---------------------------------------- 
+macros:
+    AM_THREAD_SERIALIZED: 1
+
+subcode: _autoload
+    $(if:AM_THREAD_SERIALIZED)
+        $global pthread_mutex_t am_mutex = PTHREAD_MUTEX_INITIALIZER
+
+subcode: am_lock
+    $(if:AM_THREAD_SERIALIZED and !lock)
+        # guard against double locking in e.g. AM_medium_
+        $(set:lock=1)
+        pthread_mutex_lock(&am_mutex)
+        BLOCK
+        pthread_mutex_unlock(&am_mutex)
+    $(else)
+        BLOCK
+
+# -----
 fncode: AM_Init(int *p_node_this, int *p_node_size)
     $(if:0)
         MPI_Init(NULL, NULL)
+    $(elif:AM_THREAD_SERIALIZED)
+        tn_ret = pthread_mutex_init(&am_mutex, NULL)
+        assert(tn_ret==0)
+        $my int mpi_thread_model
+        MPI_Init_thread(NULL, NULL, MPI_THREAD_SERIALIZED, &mpi_thread_model)
+        assert(mpi_thread_model==MPI_THREAD_SERIALIZED)
     $(else)
         $my int mpi_thread_model
         MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model)
@@ -67,5 +120,8 @@ fncode: AM_Init_segments(size_t size)
 
 fncode: AM_Finalize
     $call am_finalize
+    $(if:AM_THREAD_SERIALIZED)
+        tn_ret = pthread_mutex_destroy(&am_mutex)
+        assert(tn_ret==0)
 
 #---------------------------------------- 
