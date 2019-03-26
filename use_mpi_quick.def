@@ -259,8 +259,9 @@ subcode: mpi_shutdown_barrier
 #---------------------------------------- 
 subcode:1 _autoload
     $plugin MPI
-    $include <thread>
-    $global extern pthread_mutex_t am_mutex
+    $(if:AM_THREAD_SERIALIZED)
+        $include <thread>
+        $global extern pthread_mutex_t am_mutex
 
 subcode: MPI(@args)
     $local int ret
@@ -268,6 +269,9 @@ subcode: MPI(@args)
         MPI_$(args)
 
 subcode: am_lock
-    pthread_mutex_lock(&am_mutex)
-    BLOCK
-    pthread_mutex_unlock(&am_mutex)
+    $(if:AM_THREAD_SERIALIZED)
+        pthread_mutex_lock(&am_mutex)
+        BLOCK
+        pthread_mutex_unlock(&am_mutex)
+    $(else)
+        BLOCK
