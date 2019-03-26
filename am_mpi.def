@@ -69,9 +69,6 @@ subcode:: on_am_finalize
         $print "[%d] short: %d, medium: %d, long: %d", $(node_this), count_short+0, count_medium+0, count_long+0
 
 #---------------------------------------- 
-macros:
-    AM_THREAD_SERIALIZED: 1
-
 subcode: _autoload
     $(if:AM_THREAD_SERIALIZED)
         $global pthread_mutex_t am_mutex = PTHREAD_MUTEX_INITIALIZER
