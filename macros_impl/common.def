@@ -1,0 +1,6 @@
+macros:
+    # debug: 1
+    # stat: 1
+    AM_POLL: thread
+    INCOMING_THREADS: 1
+

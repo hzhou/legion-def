@@ -1,10 +1,9 @@
+include: macros_impl/common.def
 include: macros_ammpi/am_mpi.def
 # include: macros_impl/enqueue.def
 
 macros:
-    AM_POLL: thread
     # debug: 1
-    # stat: 1
 
 page: am_mpi.cc
     output_dir: ./realm_src
@@ -14,6 +13,7 @@ page: am_mpi.cc
     $include <mpi.h>
     $list AM_Init, AM_Init_segments, AM_Finalize
     $list AM_add_handler
+    $list AM_run_handler
     $list AMPoll, AMPoll_cancel, AM_short_n, AM_medium_n, AM_long_n
     $call list_AMs
 

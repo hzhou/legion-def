@@ -1,3 +1,4 @@
+include: macros_impl/common.def
 include: macros_impl/util.def
 macros: 
     USE_MPI: 1

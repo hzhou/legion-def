@@ -1,8 +1,6 @@
+include: macros_impl/common.def
 include: macros_impl/hsl.def
 include: macros_impl/util.def
-
-macros:
-    # debug: 1
 
 #---------------------------------------- 
 page: activemsg_impl_mpi.cc
@@ -104,16 +102,104 @@ subcode: mpi_enqueue_message(payload_type)
         $if !($(is_short))
             $print "enqueue_message %d->%d [$(payload_type)-%s] - size %d - %d %s", my_node_id, target, f_get_payload_mode(payload_mode), payload_size, msgid, f_get_msgid(msgid)
 
-subcode: mpi_thread_loop
+#---------------------------------------- 
+# ref: runtime_impl.cc: configure_from_command_line
+subcode: mpi_start_polling_threads
+    g_am_manager.start_threads();
+
+subcode: mpi_start_handler_threads
+    $(if:INCOMING_THREADS)
+        g_incoming_manager.start_threads(crs, count, stack)
+
+# ref: runtime_impl.cc: wait_for_shutdown
+subcode: mpi_stop_activemsg_threads
+    g_am_manager.stop_threads();
+    $(if:INCOMING_THREADS)
+        g_incoming_manager.shutdown();
+    AM_Finalize();
+
+#-----------
+subcode: _start_polling_threads
+    $call _start_thread, p_thread, AM_Manager, -
+
+subcode: _shutdown_polling_threads
+    shutdown_flag = true;
+    p_thread->join();
+    delete p_thread;
+
+subcode: _start_handler_threads
+    $call hsl_, init
+    $call cond_, init
+    $call _core_rsrv, "AM handlers"
+
+    handler_threads.resize(count);
+    Realm::ThreadLaunchParameters tlp;
+    tlp.set_stack_size(stack_size);
+    # $print "starting %d handler threads", count
+    $for i=0:count
+        $call _start_thread, handler_threads[i], Incoming_Manager, tlp
+
+subcode: _shutdown_handler_threads
+    $call hsl_, lock
+    $if !shutdown_flag
+        shutdown_flag = true
+        $call cond_, broadcast
+    $call hsl_, unlock
+
+    $foreach t in handler_threads
+        t->join()
+        delete t
+    handler_threads.clear()
+
+subcode: _polling_thread_loop
     $while true
         $if shutdown_flag
             break
         $(if:AM_ENQUEUE)
             $call am_dequeue
         AMPoll();
-    # TODO: How to cleanup seems messier than I thought
-    AM_Finalize();
 
+subcode: _handler_thread_loop
+    $while true
+        $call get_messages
+        $if msg == NULL
+            break
+        # $while msg
+        $(if:1)
+            $my I_Msg *next_msg = msg->next
+            $(if:debug)
+                $print "[%d] handle msg: %d - %p - %p", my_node_id, msg->src, msg->buf_recv, msg->buf_payload
+            # ref: macros_ammpi/am_mpi.def
+            AM_run_handler(msg->src, msg->need_free, msg->buf_recv, msg->buf_payload)
+            delete msg
+            msg = next_msg
+
+    subcode: get_messages
+        $call hsl_, lock
+        $while head == NULL
+            $if shutdown_flag
+                break
+            $call cond_, wait
+        $my I_Msg* msg = head
+        $if head==NULL
+            NOOP
+        $else
+            # take one at a time
+            head = head->next
+            num_msgs -= 1
+            $call cond_, broadcast
+        $call hsl_, unlock
+
+#---------------------------------------- 
+subcode: _core_rsrv(title)
+    core_rsrv = new Realm::CoreReservation($(title), crs, Realm::CoreReservationParameters());
+
+subcode: _start_thread(var, Class, tlp)
+    $(if:tlp=-)
+        $(set:tlp=Realm::ThreadLaunchParameters())
+    $(var) = Realm::Thread::create_kernel_thread<$(Class), &$(Class)::thread_loop>(this, $(tlp), *core_rsrv);
+
+#---------------------------------------- 
 # called in machine_impl.cc - await_all_annoucements
 subcode: mpi_do_some_polling
     # AMPoll()
@@ -121,10 +207,31 @@ subcode: mpi_do_some_polling
 subcode: mpi_get_message_source
     return (int)(long)token
 
-subcode: mpi_enqueue_incoming
+subcode: _autoload
+    $list ammpi_enqueue_incoming
+
+fncode: ammpi_enqueue_incoming(int src, bool need_free, unsigned int *buf_recv, char *buf_payload)
+    g_incoming_manager.enqueue_incoming(src,need_free, buf_recv, buf_payload)
+
+subcode: _enqueue_incoming
     $(if:debug)
-        $print "[%d] running msg handler", my_node_id
-    msg->run_handler()
+        $print "[%d] enqueue_incoming: %d - %p - %p", my_node_id, src, buf_recv, buf_payload
+    $(if:INCOMING_THREADS)
+        I_Msg *msg = new I_Msg(src, need_free, buf_recv, buf_payload);
+        $call hsl_, lock
+        $while num_msgs+handler_threads.size()+1>=AM_BUF_COUNT
+            $call cond_, wait
+        $if head==NULL
+            head=msg;
+            tail=msg;
+            num_msgs = 1;
+        $else
+            tail->next = msg;
+            tail = msg;
+            num_msgs += 1;
+        $call cond_, broadcast
+        $call hsl_, unlock
+
     # assert(0 && "compiled without USE_GASNET - active messages not available!");
 
 subcode: mpi_handle_long_msgptr
@@ -140,22 +247,10 @@ subcode: mpi_record_message
     $(if:debug)
         $print "mpi_record_message %d", sent_reply
 
-subcode: mpi_start_polling_threads
+subcode: mpi_enqueue_incoming
     $(if:debug)
-        $print "start_polling_threads."
-    g_am_manager.start_threads();
-
-subcode: mpi_start_handler_threads
-    $(if:debug)
-        $print "start_handler_threads %d", count
-
-subcode: mpi_stop_activemsg_threads
-    $(if:debug)
-        $print "stop_activemsg_threads "
-    # assert(0)
-    g_am_manager.stop_threads();
-
-
+        $print "[%d] running msg handler", my_node_id
+    msg->run_handler()
 #---- Common ------------------------------------ 
 macros:
     # 64 msgid: 140-204
