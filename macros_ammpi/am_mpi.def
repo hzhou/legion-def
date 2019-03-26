@@ -1,0 +1,368 @@
+macros:
+    AM_ARG_MAX: 1
+    AM_BUF_MAX: 256
+    AM_BUF_COUNT: 128
+    AM_TAG: 0x1
+    AM_MSG_TAG: 0x0
+    #- medium: buffer is allocated and copied
+    AM_MEDIUM_BASE: 0x100
+    #- long: buf
+    AM_LONG_BASE: 0x200
+    
+    AM_ARG_START_SHORT: 2
+    AM_ARG_START_MEDIUM: 4
+
+    # if AM_POLL!=explicit, need separate thread run AMPOLL
+    AM_POLL: explicit
+    comm: MPI_COMM_WORLD
+
+subcode: _autoload
+    $typedef void (*AM_HANDLER_T)()
+
+fncode: AM_add_handler(i, AM_HANDLER_T handler)
+    $global AM_HANDLER_T AM_table[256]
+    $include <assert.h>
+    assert(i>=0 && i<256);
+    AM_table[i] = handler
+
+#---------------------------------------- 
+subcode: _autoload
+    $(if:INCOMING_THREADS)
+        $define(AM_BUF_COUNT) $(AM_BUF_COUNT)
+        $global unsigned int buf_recv_list[AM_BUF_COUNT][$(AM_BUF_MAX)]
+        $global i_buf_recv=0 
+        $global unsigned int *buf_recv=buf_recv_list[0]
+    $(else)
+        $global unsigned int buf_recv[$(AM_BUF_MAX)]
+
+fncode: AMPoll
+    # require lock protection or run AMPoll from a single thread
+    $global MPI_Request req_recv = MPI_REQUEST_NULL
+    $(if:debug)
+        $global n_empty_AMPoll=0, n_thresh_AMPoll=10
+        n_empty_AMPoll++
+        $if n_empty_AMPoll>=n_thresh_AMPoll
+            n_thresh_AMPoll*=10
+            $print "AMPoll [%d] $n_empty_AMPoll times", $(node_this)
+    $call @start_irecv
+    $while 1
+        $my int got_am, MPI_Status status
+        $MPI Test(&req_recv, &got_am, &status)
+        $if !got_am
+            break
+        $else
+            $(if:debug)
+                n_empty_AMPoll = 0; n_thresh_AMPoll=10;
+                $print "node %d got AM from %d: [%p] %d", $(node_this), status.MPI_SOURCE, buf_recv, buf_recv[0]
+            $call @run_am
+            $call @start_irecv
+
+    # --------------------
+    subcode: start_irecv
+        # in case of self ping-pong, run_am may reply, which may trigger irecv
+        $if req_recv==MPI_REQUEST_NULL
+            $(if:INCOMING_THREADS)
+                buf_recv = buf_recv_list[i_buf_recv]
+                i_buf_recv +=1
+                i_buf_recv %= AM_BUF_COUNT
+            $(if:debug)
+                $print "[%d] Posting IRECV at [%d-%p] tag %x ...", $(node_this), i_buf_recv, buf_recv, $(AM_TAG)
+            $MPI Irecv(buf_recv, $(AM_BUF_MAX), MPI_INT, MPI_ANY_SOURCE, $(AM_TAG), $(comm), &req_recv)
+
+#----------------------------
+# FIXME: handle >2GB msg size
+subcode: run_am
+    $(set:t=buf_recv[0])
+    $(set:fn=AM_table[buf_recv[1]])
+    $(set:src=status.MPI_SOURCE)
+    $if $(t)<$(AM_MEDIUM_BASE)
+        $call @run_am_short
+    $elif $(t)<$(AM_LONG_BASE)
+        $call @run_am_medium
+    $else
+        $call @run_am_long
+
+    subcode: run_am_short
+        $(if:debug)
+            $print "[%d] am_short-%d", $(node_this), $(t)
+        $(if:INCOMING_THREADS)
+            $call make_msg_short
+        $(else)
+            $call run_short_handler
+
+    subcode: run_am_medium
+        # $(set:N=10240) # ~ 2% performance
+        $local s, int len, b_need_free
+        len = buf_recv[2]
+        $(if:debug)
+            $print "[%d] am_medium-%d: $len bytes", $(node_this), $(t)
+        $my int msg_tag = buf_recv[3]
+        b_need_free = 0
+        $(if:1) # pack_medium
+            tn_size = $(AM_ARG_START_MEDIUM)+$(t)-$(AM_MEDIUM_BASE)
+            tn_len = ($(AM_BUF_MAX) - tn_size) * sizeof(int)
+            $if len>=tn_len
+                s = (char*)malloc(len)
+                b_need_free = 1
+                $MPI Recv(s, len, MPI_BYTE, $(src), msg_tag, $(comm), &status)
+            $else
+                s = (char*)(buf_recv + tn_size)
+            
+        $(else)
+            $if len>0
+                s = (char*)malloc(len)
+                b_need_free = 1
+                $MPI Recv(s, len, MPI_BYTE, $(src), msg_tag, $(comm), &status)
+        NOOP
+        $(if:INCOMING_THREADS)
+            $call make_msg_medium
+        $(else)
+            $(t)-=$(AM_MEDIUM_BASE)
+            $call run_medium_handler
+
+            $if b_need_free
+                free(s)
+
+    subcode: run_am_long
+        $local s, int len
+        len = buf_recv[2]
+        s = (char *)g_am_base + buf_recv[3]
+        $(if:debug)
+            $print "[%d] am_long: $len bytes", $(node_this)
+        $(if:INCOMING_THREADS)
+            $call make_msg_long
+        $(else)
+            $(t)-=$(AM_LONG_BASE)
+            $call run_medium_handler
+
+# ----
+subcode: run_short_handler
+    $(for:1-16)
+        $case $(t)==$1
+            $(eval:n=$(AM_ARG_START_SHORT)+$1-1)
+            ((AM_SHORT_$1)$(fn))($(src), $(join:buf_recv[*]:,:$(AM_ARG_START_SHORT)-$(n)))
+    $else
+        $call die, "[%d] AM_SHORT: invalid number of args: %d [%d-%p]", $(node_this), $(t), i_buf_recv, buf_recv
+
+subcode: run_medium_handler
+    $(for:1-16)
+        $case $(t)==$1
+            $(eval:n=3+$1)
+            ((AM_MEDIUM_$1)$(fn))($(src), s, len, $(join:buf_recv[*]:,:$(AM_ARG_START_MEDIUM)-$(n)))
+    $else
+        $call die, "[%d] AM_MEDIUM: invalid number of args: %d", $(node_this), $(t)
+
+# ref: Incoming_Manager
+subcode: _autoload
+    $declare void ammpi_enqueue_incoming(int,bool,unsigned int*,char*)
+
+subcode: make_msg_short
+    ammpi_enqueue_incoming($(src), false, buf_recv, NULL)
+
+subcode: make_msg_medium
+    $if b_need_free
+        ammpi_enqueue_incoming($(src), true, buf_recv, s)
+    $else
+        ammpi_enqueue_incoming($(src), false, buf_recv, s)
+
+subcode: make_msg_long
+    ammpi_enqueue_incoming($(src), false, buf_recv, s)
+
+fncode: AM_run_handler(int src, bool need_free, unsigned int *buf_recv, char *buf_payload)
+    $(set:src=src)
+    $(set:t=buf_recv[0])
+    $(set:fn=AM_table[buf_recv[1]])
+    $if $(t)<$(AM_MEDIUM_BASE)
+        $call @run_short_handler
+    $else
+        $if $(t)<$(AM_LONG_BASE)
+            $(t)-=$(AM_MEDIUM_BASE)
+        $else
+            $(t)-=$(AM_LONG_BASE)
+        $my int len = buf_recv[2]
+        $my s = buf_payload
+        $call @run_medium_handler
+        $if need_free
+            free(s)
+
+#---------------------------------------- 
+fncode: AMPoll_cancel
+    $if req_recv != MPI_REQUEST_NULL
+        $MPI Cancel(&req_recv)
+
+#---------------------------------------- 
+subcode: AM_short_(n, tgt, handler, @args)
+    $call @on_am_send, short
+    $(if:AM_POLL=explicit)
+        AMPoll()
+    # AMRequestShort$(n)($(tgt), $(handler), $(args))
+    $local int buf_send[$(AM_BUF_MAX)]
+    buf_send[0] = $(n)
+    buf_send[1] = $(handler)
+    $call AM_copy_send, $(AM_ARG_START_SHORT) # 2
+    $(if:debug)
+        $print "%d->%d am_send short: id=%d", $(node_this), $(tgt), $(handler)
+
+subcode: AM_medium_(n, tgt, handler, msg, len, @args)
+    &call am_lock
+        $call @on_am_send, medium
+        $(if:AM_POLL=explicit)
+            AMPoll()
+        $local int buf_send[$(AM_BUF_MAX)]
+        buf_send[0] = $(n) + $(AM_MEDIUM_BASE)
+        buf_send[1] = $(handler)
+        buf_send[2] = $(len)
+        $my int msg_tag = $(AM_MSG_TAG)
+        $call @set_am_msg_tag # THREAD_MULTIPLE: embed thread id or atomic seq number
+        buf_send[3] = msg_tag
+        $(set:pack_medium=1)
+        $call AM_copy_send, $(AM_ARG_START_MEDIUM) # 4
+        $(if:debug)
+            $print "%d->%d am_send msg: %d bytes (tag=%x)", $(node_this), $(tgt), $(len), msg_tag
+        $if $(len)>0
+            $call am_send, $(msg), $(len), MPI_BYTE, $(tgt), msg_tag, $(comm)
+
+subcode: AM_long_(n, tgt, handler, msg, len, dst, @args)
+    &call am_lock
+        $call @on_am_send, long
+        $(if:AM_POLL=explicit)
+            AMPoll()
+        $MPI Win_lock(MPI_LOCK_SHARED, $(tgt), 0, g_am_win)
+        assert(g_am_win)
+        $MPI Put($(msg), $(len), MPI_BYTE, $(tgt), (MPI_Aint)$(dst), $(len), MPI_BYTE, g_am_win)
+        $MPI Win_unlock($(tgt), g_am_win)
+
+        $local int buf_send[$(AM_BUF_MAX)]
+        buf_send[0] = $(n) + $(AM_LONG_BASE)
+        buf_send[1] = $(handler)
+        buf_send[2] = $(len)
+        buf_send[3] = (int32_t)((uint64_t)$(dst) & 0xffffffff)
+        $call AM_copy_send, $(AM_ARG_START_MEDIUM) # 4
+
+# --
+subcode: AM_copy_send(i0)
+    $(if:n=n)
+        $for i=0:n
+            buf_send[$(i0)+i] = $(args)[i]
+    $(else)
+        $(set:i=$(i0))
+        $(for:a in $(args))
+            buf_send[$(i)] = $(a)
+            $(set-1:i+=1)
+
+    $(if:pack_medium)
+        $(if:n=n)
+            tn_size = $(i0)+n
+        $(else)
+            tn_size = $(i)
+        ts_tmp = (char*) &buf_send[tn_size]
+        tn_len = ($(AM_BUF_MAX) - tn_size) * sizeof(int)
+        $if $(len)>0 && $(len)<tn_len
+            memcpy(ts_tmp, $(msg), $(len))
+            tn_size += ($(len)+sizeof(int)-1)/sizeof(int)
+            $(len) = 0
+        $call am_send, buf_send, tn_size, MPI_INT, $(tgt), $(AM_TAG), $(comm)
+    $(else)
+        $call am_send, buf_send, $(n)+$(i0), MPI_INT, $(tgt), $(AM_TAG), $(comm)
+
+# ----
+fncode: AM_short_n(n, int tgt, int handler, const int* args)
+    $call AM_short_, n, tgt, handler, args
+fncode: AM_medium_n(n, int tgt, int handler, const void* msg, int len, const int* args)
+    $call AM_medium_, n, tgt, handler, msg, len, args
+fncode: AM_long_n(n, int tgt, int handler, const void* msg, int len, void* dst, const int* args)
+    $call AM_long_, n, tgt, handler, msg, len, dst, args
+
+subcode: list_AMs(@what)
+    $global MPI_Win g_am_win
+    $global void * g_am_base, size_t g_am_win_size
+    $global void ** g_am_bases
+
+    $list AMPoll
+    $(for:n in 1-16)
+        $(set:Args=$(join:int arg_*:, :1-$(n)))
+        $(set:args=$(join:arg_*:, :1-$(n)))
+        $typedef void (*AM_SHORT_$(n))(int src, $(Args))
+        $typedef void (*AM_MEDIUM_$(n))(int src, void* msg, int len, $(Args))
+
+        $(if:what=all)
+            $(set:A=int tgt, int handler)
+            $(set:a=tgt, handler)
+            $(set:B=$(A), const void *msg, int len)
+            $(set:b=$(a), msg, len)
+            $function AM_short_$(n)($(A), $(Args)): global void
+                $call AM_short_, $(n), $(a), $(args)
+            $function AM_medium_$(n)($(B), $(Args)): global void
+                $call AM_medium_, $(n), $(b), $(args)
+            $function AM_long_$(n)($(B), void* dst, $(Args)): global void
+                $call AM_long_, $(n), $(b), dst, $(args)
+
+#---------------------------------------- 
+subcode: block_until(@cond)
+    $while !($(cond))
+        AMPoll()
+
+subcode: block_on_request(req)
+    $while 1
+        $my int is_done, MPI_Status status
+        $MPI Test(&$(req), &is_done, &status)
+        $if $(req) == MPI_REQUEST_NULL
+            break
+        AMPoll()
+
+# ----
+subcode: am_send(@args)
+    $(if:AM_POLL=explicit)
+        $local MPI_Request req_send
+        $MPI Isend($(args), &req_send)
+        $call block_on_request, req_send
+    $(else)
+        assert(tgt!=$(node_this))
+        $MPI Send($(args))
+
+subcode: am_initialize
+    $global int node_size, int node_this
+    MPI_Init(NULL, NULL);
+    MPI_Comm_size($(comm), &node_size)
+    MPI_Comm_rank($(comm), &node_this)
+
+subcode: am_init_win(size)
+    g_am_win_size = $(size)
+    assert(g_am_win_size!=0)
+    g_am_base = malloc(g_am_win_size)
+    assert(g_am_base!=NULL)
+    $MPI Win_create(g_am_base, g_am_win_size, 1, MPI_INFO_NULL, $(comm), &g_am_win)
+    
+    g_am_bases = (void**)malloc(node_size * sizeof(void*))
+    $MPI Allgather(&g_am_base, 8, MPI_BYTE, g_am_bases, 8, MPI_BYTE, $(comm))
+
+subcode: am_finalize
+    $call @on_am_finalize
+    $(if:1) 
+        # Continue polling message until we are sure no one is sending
+        $local MPI_Request req_final
+        $MPI Ibarrier($(comm), &req_final)
+        $call block_on_request, req_final
+
+    AMPoll_cancel()
+
+    $if g_am_base
+        $MPI Win_free(&g_am_win)
+        free(g_am_base)
+    MPI_Finalize()
+
+#---------------------------------------- 
+subcode:1 _autoload
+    $plugin MPI
+
+subcode: MPI(@args)
+    $local int ret
+    &call @am_lock
+        ret = MPI_$(args)
+        $if ret!=MPI_SUCCESS
+            $call die, MPI error in [$(@args)]
+
+#---------------------------------------- 
+macros:
+    # used for ebugging messages
+    node_this: node_this
