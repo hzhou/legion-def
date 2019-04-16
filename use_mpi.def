@@ -2,6 +2,8 @@ include: macros_impl/common.def
 include: macros_impl/hsl.def
 include: macros_impl/util.def
 
+include: macros_impl/profile.def
+
 #---------------------------------------- 
 page: activemsg_impl_mpi.cc
     output_dir: ./realm_src

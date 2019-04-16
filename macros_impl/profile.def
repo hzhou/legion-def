@@ -1,0 +1,71 @@
+macros:
+    DO_PROFILE: 1
+    # types
+    SEND_SHORT: 1
+    SEND_MEDIUM: 2
+    SEND_LONG: 3
+
+    CAPACITY: 1000000
+
+subcode: _autoload
+    $struct(profile_entry) struct timespec time, int thread_id, int type, int size
+    $call profile_init
+
+subcode: profile_init
+    $global struct profile_entry g_profiles[10][$(CAPACITY)], int64_t pn_profiles[10]
+
+fncode: profile_event(int id, int param)
+    $(set:prof=g_profiles[0][pn_profiles[0]].$1)
+    $(prof:type) = id
+    $(prof:size) = param
+    clock_gettime(CLOCK_REALTIME, &$(prof:time))
+    pn_profiles[0]++
+
+subcode: profile_add(type, size)
+    # $call get_thread_id
+    $if thread_id>0 && thread_id<10 && pn_profiles[thread_id] < $(CAPACITY)
+        $(set:prof=g_profiles[thread_id][pn_profiles[thread_id]].$1)
+        $(prof:type) = $(type)
+        $(prof:size) = $(size)
+        clock_gettime(CLOCK_REALTIME, &$(prof:time))
+        pn_profiles[thread_id]++
+
+subcode: profile_dump(id)
+    $for i=0:10
+        $if pn_profiles[i]>0
+            $call dump_it, i
+
+    subcode: dump_it(thread_id)
+        $my char ts_name[100]
+        sprintf(ts_name, "%d-%d.profile", $(id), $(thread_id))
+        &call open_w, ts_name
+            $for 0:pn_profiles[i]
+                $(set:prof=g_profiles[i][$(i)].$1)
+                fprintf(file_out, "%6ld.%09ld: %d - %d\n", $(prof:time).tv_sec, $(prof:time).tv_nsec, $(prof:type), $(prof:size))
+
+#---------------------------------------- 
+subcode:: on_am_send(which) # short, medium, long
+    $(if:which=short)
+        $call profile_add, $(SEND_SHORT), $(n)
+    $(elif:which=medium)
+        $call profile_add, $(SEND_MEDIUM), $(n)+$(len)/4
+    $(else)
+        $call profile_add, $(SEND_LONG), $(n)+$(len)/4
+
+subcode:: on_am_finalize
+    $call profile_dump, $(node_this)
+
+#----- simple counter stat --------------
+subcode: _autoload
+    $(if:stat)
+        $register_prefix(count) std::atomic_uint
+        $global count_short, count_medium, count_long
+
+subcode:: on_am(which)
+    $(if:stat)
+        count_$(which)++
+
+subcode:: on_am_finalize
+    $(if:stat)
+        $print "[%d] short: %d, medium: %d, long: %d", $(node_this), count_short+0, count_medium+0, count_long+0
+

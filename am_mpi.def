@@ -2,6 +2,8 @@ include: macros_impl/common.def
 include: macros_ammpi/am_mpi.def
 # include: macros_impl/enqueue.def
 
+include: macros_impl/profile.def
+
 macros:
     # debug: 1
 
@@ -16,6 +18,8 @@ page: am_mpi.cc
     $list AM_run_handler
     $list AMPoll, AMPoll_cancel, AM_short_n, AM_medium_n, AM_long_n
     $call list_AMs
+    $(if:DO_PROFILE)
+        $list profile_event
 
 subcode: _autoload
     $(setmacro:node_this=my_node_id)
@@ -40,10 +44,13 @@ subcode:: _autoload
     $include <atomic>
     $global std::atomic_uint num_threads
 
-subcode:: on_am_send(which)
+subcode: get_thread_id
     $if thread_id==0
         num_threads++
         thread_id = num_threads
+
+subcode:: on_am_send(which)
+    $call get_thread_id
 
 /*
 subcode:: on_am_send(which)
@@ -54,20 +61,6 @@ subcode:: on_am_send(which)
 subcode:: on_am_finalize
     $print "[%d] thread msg stats: $(join:* %d:, :0-9)", $(node_this), $(join:thread_stat[*]:, :0-9)
 */
-# -----
-subcode: _autoload
-    $(if:stat)
-        $register_prefix(count) std::atomic_uint
-        $global count_short, count_medium, count_long
-
-subcode:: on_am(which)
-    $(if:stat)
-        count_$(which)++
-
-subcode:: on_am_finalize
-    $(if:stat)
-        $print "[%d] short: %d, medium: %d, long: %d", $(node_this), count_short+0, count_medium+0, count_long+0
-
 #---------------------------------------- 
 subcode: _autoload
     $(if:AM_THREAD_SERIALIZED)
@@ -85,6 +78,8 @@ subcode: am_lock
 
 # -----
 fncode: AM_Init(int *p_node_this, int *p_node_size)
+    $(if:DO_PROFILE)
+        profile_event(0, 0)
     $(if:0)
         MPI_Init(NULL, NULL)
     $(elif:AM_THREAD_SERIALIZED)
@@ -116,6 +111,8 @@ fncode: AM_Init_segments(size_t size)
     $call am_init_win, size
 
 fncode: AM_Finalize
+    $(if:DO_PROFILE)
+        profile_event(0, 1)
     $call am_finalize
     $(if:AM_THREAD_SERIALIZED)
         tn_ret = pthread_mutex_destroy(&am_mutex)
