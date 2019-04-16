@@ -2,8 +2,6 @@ include: macros_impl/common.def
 include: macros_impl/hsl.def
 include: macros_impl/util.def
 
-include: macros_impl/profile.def
-
 #---------------------------------------- 
 page: activemsg_impl_mpi.cc
     output_dir: ./realm_src
@@ -122,6 +120,8 @@ subcode: mpi_stop_activemsg_threads
 
 #-----------
 subcode: _start_polling_threads
+    $declare void profile_event(int)
+    profile_event(1000)
     $call _start_thread, p_thread, AM_Manager, -
 
 subcode: _shutdown_polling_threads

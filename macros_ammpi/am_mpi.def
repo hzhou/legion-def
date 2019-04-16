@@ -76,10 +76,13 @@ subcode: run_am
     $(set:fn=AM_table[buf_recv[1]])
     $(set:src=status.MPI_SOURCE)
     $if $(t)<$(AM_MEDIUM_BASE)
+        $call @on_am_recv, short
         $call @run_am_short
     $elif $(t)<$(AM_LONG_BASE)
+        $call @on_am_recv, medium
         $call @run_am_medium
     $else
+        $call @on_am_recv, long
         $call @run_am_long
 
     subcode: run_am_short

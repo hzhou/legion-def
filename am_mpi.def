@@ -79,7 +79,7 @@ subcode: am_lock
 # -----
 fncode: AM_Init(int *p_node_this, int *p_node_size)
     $(if:DO_PROFILE)
-        profile_event(0, 0)
+        profile_event(101)
     $(if:0)
         MPI_Init(NULL, NULL)
     $(elif:AM_THREAD_SERIALIZED)
@@ -112,7 +112,7 @@ fncode: AM_Init_segments(size_t size)
 
 fncode: AM_Finalize
     $(if:DO_PROFILE)
-        profile_event(0, 1)
+        profile_event(102)
     $call am_finalize
     $(if:AM_THREAD_SERIALIZED)
         tn_ret = pthread_mutex_destroy(&am_mutex)
