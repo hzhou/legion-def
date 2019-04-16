@@ -47,6 +47,7 @@ subcode: profile_dump(id)
 
 #---------------------------------------- 
 subcode:: on_am_recv(which)
+    $call get_thread_id
     $call profile_add, $(RECV_ALL), 1
 
 subcode:: on_am_send(which) # short, medium, long
