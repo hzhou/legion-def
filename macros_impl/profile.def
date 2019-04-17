@@ -61,6 +61,10 @@ subcode:: on_am_send(which) # short, medium, long
 subcode:: on_am_finalize
     $call profile_dump, $(node_this)
 
+# ----
+subcode:: on_am_poll_empty
+    profile_event(n_thresh_AMPoll)
+
 #----- simple counter stat --------------
 subcode: _autoload
     $(if:stat)
