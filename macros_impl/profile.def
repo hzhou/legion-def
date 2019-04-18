@@ -72,7 +72,8 @@ macros:
 
 subcode:: on_am_poll_empty
     # profile_event(n_thresh_AMPoll)
-    debug_hook()
+    $if pn_profiles[thread_id] > 20000
+        debug_hook()
 
 #----- simple counter stat --------------
 subcode: _autoload
