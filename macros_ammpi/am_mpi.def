@@ -38,12 +38,13 @@ subcode: _autoload
 fncode: AMPoll
     # require lock protection or run AMPoll from a single thread
     $global MPI_Request req_recv = MPI_REQUEST_NULL
-    $(if:1)
-        $global n_empty_AMPoll=0, n_thresh_AMPoll=10
+    $(if:DEBUG_AM_POLL_EMPTY)
+        $(split:DEBUG_AM_POLL_EMPTY) # 10,10
+        $global n_empty_AMPoll=0, n_thresh_AMPoll=$(p_1)
         n_empty_AMPoll++
         $if n_empty_AMPoll>=n_thresh_AMPoll
             $call @on_am_poll_empty
-            n_thresh_AMPoll*=10
+            n_thresh_AMPoll*=$(p_2)
             # $print "AMPoll [%d] $n_empty_AMPoll times", $(node_this)
     $call @start_irecv
     $while 1

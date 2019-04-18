@@ -46,6 +46,11 @@ subcode: profile_dump(id)
                 fprintf(file_out, "%6ld.%09ld: %d - %d\n", $(prof:time).tv_sec, $(prof:time).tv_nsec, $(prof:type), $(prof:size))
 
 #---------------------------------------- 
+fncode: debug_hook
+    $global debug_hook_count = 0
+    debug_hook_count++
+
+#---------------------------------------- 
 subcode:: on_am_recv(which)
     $call get_thread_id
     $call profile_add, $(RECV_ALL), 1
@@ -62,8 +67,12 @@ subcode:: on_am_finalize
     $call profile_dump, $(node_this)
 
 # ----
+macros:
+    DEBUG_AM_POLL_EMPTY: 1000,1
+
 subcode:: on_am_poll_empty
-    profile_event(n_thresh_AMPoll)
+    # profile_event(n_thresh_AMPoll)
+    debug_hook()
 
 #----- simple counter stat --------------
 subcode: _autoload
