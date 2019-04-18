@@ -40,8 +40,9 @@ fncode: AMPoll
     $global MPI_Request req_recv = MPI_REQUEST_NULL
     $(if:DEBUG_AM_POLL_EMPTY)
         $(split:DEBUG_AM_POLL_EMPTY) # 10,10
-        $global n_empty_AMPoll=0, n_thresh_AMPoll=$(p_1)
-        n_empty_AMPoll++
+        $global n_empty_AMPoll=-1, n_thresh_AMPoll=$(p_1)
+        $if n_empty_AMPoll>=0
+            n_empty_AMPoll++
         $if n_empty_AMPoll>=n_thresh_AMPoll
             $call @on_am_poll_empty
             n_thresh_AMPoll*=$(p_2)
@@ -53,9 +54,10 @@ fncode: AMPoll
         $if !got_am
             break
         $else
-            $(if:debug)
-                n_empty_AMPoll = 0; n_thresh_AMPoll=10;
-                $print "node %d got AM from %d: [%p] %d", $(node_this), status.MPI_SOURCE, buf_recv, buf_recv[0]
+            $(if:DEBUG_AM_POLL_EMPTY)
+                $(split:DEBUG_AM_POLL_EMPTY) # 10,10
+                n_empty_AMPoll = 0; n_thresh_AMPoll=$(p_1);
+                # $print "node %d got AM from %d: [%p] %d", $(node_this), status.MPI_SOURCE, buf_recv, buf_recv[0]
             $call @run_am
             $call @start_irecv
 
