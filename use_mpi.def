@@ -141,6 +141,7 @@ subcode: _start_handler_threads
     $for i=0:count
         $call _start_thread, handler_threads[i], Incoming_Manager, tlp
 
+# if INCOMING_THREADS ...
 subcode: _shutdown_handler_threads
     $call hsl_, lock
     $if !shutdown_flag

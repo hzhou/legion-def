@@ -47,7 +47,7 @@ subcode:: _autoload
 subcode: get_thread_id
     $if thread_id==0
         num_threads++
-        thread_id = num_threads
+        thread_id = num_threads;
 
 subcode:: on_am_send(which)
     $call get_thread_id

@@ -26,6 +26,11 @@ fncode: profile_event(int id)
 subcode: profile_add(type, size)
     # $call get_thread_id
     $if thread_id>0 && thread_id<10 && pn_profiles[thread_id] < $(CAPACITY)
+        $(if:DO_PAPI)
+            $if pn_profiles[thread_id]==0
+                $call papi_start_counters
+            $call papi_read_counters
+
         $(set:prof=g_profiles[thread_id][pn_profiles[thread_id]].$1)
         $(prof:type) = $(type)
         $(prof:size) = $(size)
@@ -89,3 +94,28 @@ subcode:: on_am_finalize
     $(if:stat)
         $print "[%d] short: %d, medium: %d, long: %d", $(node_this), count_short+0, count_medium+0, count_long+0
 
+#---- PAPI ------------------------------------ 
+macros:
+    DO_PAPI: 1
+
+subcode: _autoload
+    $include <papi.h>
+    # $uselib papi
+
+fncode: papi_thread_id: unsigned int
+    return thread_id
+
+subcode:: on_am_initialize
+    $(if:0)
+        $list papi_thread_id
+        PAPI_library_init(PAPI_VER_CURRENT)
+        PAPI_thread_init(papi_thread_id)
+
+subcode: papi_start_counters
+    $global int papi_events[1] = {PAPI_TOT_INS}
+    $global long_long papi_values[10]
+    PAPI_start_counters(papi_events, 1)
+
+subcode: papi_read_counters
+    PAPI_read_counters(papi_values+thread_id, 1)
+    $(export:size=papi_values[thread_id])

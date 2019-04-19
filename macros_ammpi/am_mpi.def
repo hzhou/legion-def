@@ -33,6 +33,7 @@ subcode: _autoload
         $global i_buf_recv=0 
         $global unsigned int *buf_recv=buf_recv_list[0]
     $(else)
+        $global i_buf_recv=0  # just to make debug easier
         $global unsigned int buf_recv[$(AM_BUF_MAX)]
 
 fncode: AMPoll
@@ -144,6 +145,7 @@ subcode: run_am
 
 # ----
 subcode: run_short_handler
+    NOOP # protect $case
     $(for:1-16)
         $case $(t)==$1
             $(eval:n=$(AM_ARG_START_SHORT)+$1-1)
@@ -152,6 +154,7 @@ subcode: run_short_handler
         $call die, "[%d] AM_SHORT: invalid number of args: %d [%d-%p]", $(node_this), $(t), i_buf_recv, buf_recv
 
 subcode: run_medium_handler
+    NOOP # protect $case
     $(for:1-16)
         $case $(t)==$1
             $(eval:n=3+$1)
@@ -332,6 +335,7 @@ subcode: am_initialize
     MPI_Init(NULL, NULL);
     MPI_Comm_size($(comm), &node_size)
     MPI_Comm_rank($(comm), &node_this)
+    $call @on_am_initialize
 
 subcode: am_init_win(size)
     g_am_win_size = $(size)
