@@ -35,6 +35,7 @@ subcode: _autoload
         $global MPI_Request req_recv = MPI_REQUEST_NULL
     $(elif:AM_MULT_RECV)
         $global MPI_Request req_recv_list[AM_BUF_COUNT]
+        $global n_am_mult_recv = $(AM_MULT_RECV)
     $(else)
         $global MPI_Request req_recv = MPI_REQUEST_NULL
 
@@ -51,7 +52,11 @@ fncode: AMPoll_init
         i_buf_recv %= AM_BUF_COUNT
         $call _start_irecv, -
     $(elif:AM_MULT_RECV)
-        $for i=0:$(AM_MULT_RECV)
+        s = getenv("AM_MULT_RECV")
+        $if s
+            n_am_mult_recv = atoi(s)
+        # $dump n_am_mult_recv
+        $for i=0:n_am_mult_recv
             $call _start_irecv, i
     $(else)
         $call _start_irecv, -
@@ -72,7 +77,7 @@ fncode: AMPoll
         $my int got_am, MPI_Status status
         $(if:AM_MULT_RECV)
             i_got = -1
-            $MPI Testany($(AM_MULT_RECV), req_recv_list, &i_got, &got_am, &status)
+            $MPI Testany(n_am_mult_recv, req_recv_list, &i_got, &got_am, &status)
             $if !got_am
                 break
             buf_recv = buf_recv_list[i_got]
@@ -233,7 +238,7 @@ fncode: AM_run_handler(int src, bool need_free, unsigned int *buf_recv, char *bu
 #---------------------------------------- 
 fncode: AMPoll_cancel
     $(if:AM_MULT_RECV)
-        $for i=0:$(AM_MULT_RECV)
+        $for i=0:n_am_mult_recv
             $MPI Cancel(&req_recv_list[i])
     $(else)
         $if req_recv != MPI_REQUEST_NULL

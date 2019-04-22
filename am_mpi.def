@@ -2,7 +2,7 @@ include: macros_impl/common.def
 include: macros_ammpi/am_mpi.def
 # include: macros_impl/enqueue.def
 
-include: macros_impl/profile.def
+# include: macros_impl/profile.def
 
 macros:
     # debug: 1
