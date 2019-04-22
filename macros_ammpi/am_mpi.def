@@ -27,18 +27,37 @@ fncode: AM_add_handler(i, AM_HANDLER_T handler)
 
 #---------------------------------------- 
 subcode: _autoload
+    $define(AM_BUF_COUNT) $(AM_BUF_COUNT)
+    $global unsigned int buf_recv_list[AM_BUF_COUNT][$(AM_BUF_MAX)]
+    $global i_buf_recv=0 
+    $global unsigned int *buf_recv=buf_recv_list[0]
     $(if:INCOMING_THREADS)
-        $define(AM_BUF_COUNT) $(AM_BUF_COUNT)
-        $global unsigned int buf_recv_list[AM_BUF_COUNT][$(AM_BUF_MAX)]
-        $global i_buf_recv=0 
-        $global unsigned int *buf_recv=buf_recv_list[0]
+        $global MPI_Request req_recv = MPI_REQUEST_NULL
+    $(elif:AM_MULT_RECV)
+        $global MPI_Request req_recv_list[AM_BUF_COUNT]
     $(else)
-        $global i_buf_recv=0  # just to make debug easier
-        $global unsigned int buf_recv[$(AM_BUF_MAX)]
+        $global MPI_Request req_recv = MPI_REQUEST_NULL
+
+subcode: _start_irecv(which)
+    $(if:which=-)
+        $MPI Irecv(buf_recv, $(AM_BUF_MAX), MPI_INT, MPI_ANY_SOURCE, $(AM_TAG), $(comm), &req_recv)
+    $(else)
+        $MPI Irecv(buf_recv_list[$(which)], $(AM_BUF_MAX), MPI_INT, MPI_ANY_SOURCE, $(AM_TAG), $(comm), &req_recv_list[$(which)])
+
+fncode: AMPoll_init
+    $(if:INCOMING_THREADS)
+        buf_recv = buf_recv_list[i_buf_recv]
+        i_buf_recv +=1
+        i_buf_recv %= AM_BUF_COUNT
+        $call _start_irecv, -
+    $(elif:AM_MULT_RECV)
+        $for i=0:$(AM_MULT_RECV)
+            $call _start_irecv, i
+    $(else)
+        $call _start_irecv, -
 
 fncode: AMPoll
     # require lock protection or run AMPoll from a single thread
-    $global MPI_Request req_recv = MPI_REQUEST_NULL
     $(if:DEBUG_AM_POLL_EMPTY)
         $(split:DEBUG_AM_POLL_EMPTY) # 10,10
         $global n_empty_AMPoll=-1, n_thresh_AMPoll=$(p_1)
@@ -48,31 +67,47 @@ fncode: AMPoll
             $call @on_am_poll_empty
             n_thresh_AMPoll*=$(p_2)
             # $print "AMPoll [%d] $n_empty_AMPoll times", $(node_this)
-    $call @start_irecv
+    # $call @start_irecv
     $while 1
         $my int got_am, MPI_Status status
-        $MPI Test(&req_recv, &got_am, &status)
-        $if !got_am
-            break
-        $else
-            $(if:DEBUG_AM_POLL_EMPTY)
-                $(split:DEBUG_AM_POLL_EMPTY) # 10,10
-                n_empty_AMPoll = 0; n_thresh_AMPoll=$(p_1);
-                # $print "node %d got AM from %d: [%p] %d", $(node_this), status.MPI_SOURCE, buf_recv, buf_recv[0]
-            $call @run_am
-            $call @start_irecv
+        $(if:AM_MULT_RECV)
+            i_got = -1
+            $MPI Testany($(AM_MULT_RECV), req_recv_list, &i_got, &got_am, &status)
+            $if !got_am
+                break
+            buf_recv = buf_recv_list[i_got]
+        $(else)
+            $MPI Test(&req_recv, &got_am, &status)
+            $if !got_am
+                break
+
+        $(if:DEBUG_AM_POLL_EMPTY)
+            $(split:DEBUG_AM_POLL_EMPTY) # 10,10
+            n_empty_AMPoll = 0; n_thresh_AMPoll=$(p_1);
+            # $print "node %d got AM from %d: [%p] %d", $(node_this), status.MPI_SOURCE, buf_recv, buf_recv[0]
+        $call @run_am
+        $call @start_irecv
 
     # --------------------
     subcode: start_irecv
         # in case of self ping-pong, run_am may reply, which may trigger irecv
-        $if req_recv==MPI_REQUEST_NULL
-            $(if:INCOMING_THREADS)
-                buf_recv = buf_recv_list[i_buf_recv]
-                i_buf_recv +=1
-                i_buf_recv %= AM_BUF_COUNT
-            $(if:debug)
-                $print "[%d] Posting IRECV at [%d-%p] tag %x ...", $(node_this), i_buf_recv, buf_recv, $(AM_TAG)
-            $MPI Irecv(buf_recv, $(AM_BUF_MAX), MPI_INT, MPI_ANY_SOURCE, $(AM_TAG), $(comm), &req_recv)
+        # $if req_recv==MPI_REQUEST_NULL
+        $(if:INCOMING_THREADS)
+            buf_recv = buf_recv_list[i_buf_recv]
+            i_buf_recv +=1
+            i_buf_recv %= AM_BUF_COUNT
+        $(if:debug)
+            $print "[%d] Posting IRECV at [%d-%p] tag %x ...", $(node_this), i_buf_recv, buf_recv, $(AM_TAG)
+        $(if:AM_MULT_RECV)
+            $call _start_irecv, i_got
+        $(else)
+            $call _start_irecv, -
+
+    # --------------------
+    subcode: start_irecv_mult(which)
+        $(if:which=-)
+        $(else)
+            $MPI Irecv(buf_recv_list[$(which)], $(AM_BUF_MAX), MPI_INT, MPI_ANY_SOURCE, $(AM_TAG), $(comm), &req_recv_list[$(which)])
 
 #----------------------------
 # FIXME: handle >2GB msg size
@@ -197,8 +232,12 @@ fncode: AM_run_handler(int src, bool need_free, unsigned int *buf_recv, char *bu
 
 #---------------------------------------- 
 fncode: AMPoll_cancel
-    $if req_recv != MPI_REQUEST_NULL
-        $MPI Cancel(&req_recv)
+    $(if:AM_MULT_RECV)
+        $for i=0:$(AM_MULT_RECV)
+            $MPI Cancel(&req_recv_list[i])
+    $(else)
+        $if req_recv != MPI_REQUEST_NULL
+            $MPI Cancel(&req_recv)
 
 #---------------------------------------- 
 subcode: AM_short_(n, tgt, handler, @args)

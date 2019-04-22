@@ -4,4 +4,5 @@ macros:
     AM_POLL: thread
     # INCOMING_THREADS: 1
     # AM_THREAD_SERIALIZED: 1
+    AM_MULT_RECV: 3
 

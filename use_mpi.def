@@ -120,8 +120,8 @@ subcode: mpi_stop_activemsg_threads
 
 #-----------
 subcode: _start_polling_threads
-    $declare void profile_event(int)
-    profile_event(1000)
+    # $declare void profile_event(int)
+    # profile_event(1000)
     $call _start_thread, p_thread, AM_Manager, -
 
 subcode: _shutdown_polling_threads
@@ -155,6 +155,7 @@ subcode: _shutdown_handler_threads
     handler_threads.clear()
 
 subcode: _polling_thread_loop
+    AMPoll_init();
     $while true
         $if shutdown_flag
             break

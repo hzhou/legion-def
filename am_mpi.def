@@ -16,7 +16,7 @@ page: am_mpi.cc
     $list AM_Init, AM_Init_segments, AM_Finalize
     $list AM_add_handler
     $list AM_run_handler
-    $list AMPoll, AMPoll_cancel, AM_short_n, AM_medium_n, AM_long_n
+    $list AMPoll, AMPoll_init, AMPoll_cancel, AM_short_n, AM_medium_n, AM_long_n
     $call list_AMs
     $(if:DO_PROFILE)
         $list profile_event
