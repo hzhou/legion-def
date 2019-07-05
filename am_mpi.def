@@ -35,11 +35,13 @@ subcode: set_am_msg_tag
         $if msg_tag==10
             $print $$(node_this) msg_tag: $msg_tag
     $(else)
-        msg_tag = (thread_id<<1)
+        am_seq = (am_seq+1) & 0xff
+        msg_tag = (thread_id<<8) + am_seq
 
 subcode:: _autoload
     $include <thread>
     $global thread_local int thread_id=0
+    $global thread_local int am_seq=0
 
     $include <atomic>
     $global std::atomic_uint num_threads

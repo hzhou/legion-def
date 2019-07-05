@@ -1,7 +1,9 @@
 macros:
     AM_ARG_MAX: 1
-    AM_BUF_MAX: 256
-    AM_BUF_COUNT: 128
+    AM_BUF_MAX: 80
+    AM_BUF_COUNT: 128 # further via ENV{AM_MULT_RECV}
+    AM_BUF_MEDIUM: 100000
+
     AM_TAG: 0x1
     AM_MSG_TAG: 0x0
     #- medium: buffer is allocated and copied
@@ -26,6 +28,10 @@ fncode: AM_add_handler(i, AM_HANDLER_T handler)
     AM_table[i] = handler
 
 #---------------------------------------- 
+subcode: _autoload
+    $define likely(x) __builtin_expect(!!(x), 1)
+    $define unlikely(x) __builtin_expect(!!(x), 0)
+
 subcode: _autoload
     $define(AM_BUF_COUNT) $(AM_BUF_COUNT)
     $global unsigned int buf_recv_list[AM_BUF_COUNT][$(AM_BUF_MAX)]
@@ -74,9 +80,30 @@ fncode: AMPoll
             # $print "AMPoll [%d] $n_empty_AMPoll times", $(node_this)
     # $call @start_irecv
     $while 1
+        $(if:0)
+            $call poll_any
+        $(else)
+            # waits longer and still no way to sort order
+            $call poll_some
+
+    subcode: poll_some
+        $my int n_got=0, pn_got[AM_BUF_COUNT], MPI_Status p_statuses[AM_BUF_COUNT]
+        $MPI Testsome(n_am_mult_recv, req_recv_list, &n_got, pn_got, p_statuses)
+        $if !n_got
+            break
+        $for i=0:n_got
+            $my i_got = pn_got[i]
+            $my tn_src = p_statuses[i].MPI_SOURCE
+            buf_recv = buf_recv_list[i_got]
+            $call @run_am, tn_src
+            $call @start_irecv
+
+    # Note: the same node/rank may send to same tgt with same msg signature multiple times
+    #       MPI_Testany may mess up with the order, medium msg tag need be unique within a range
+    subcode: poll_any
         $my int got_am, MPI_Status status
         $(if:AM_MULT_RECV)
-            i_got = -1
+            $my i_got = -1
             $MPI Testany(n_am_mult_recv, req_recv_list, &i_got, &got_am, &status)
             $if !got_am
                 break
@@ -90,7 +117,7 @@ fncode: AMPoll
             $(split:DEBUG_AM_POLL_EMPTY) # 10,10
             n_empty_AMPoll = 0; n_thresh_AMPoll=$(p_1);
             # $print "node %d got AM from %d: [%p] %d", $(node_this), status.MPI_SOURCE, buf_recv, buf_recv[0]
-        $call @run_am
+        $call @run_am, status.MPI_SOURCE
         $call @start_irecv
 
     # --------------------
@@ -116,10 +143,9 @@ fncode: AMPoll
 
 #----------------------------
 # FIXME: handle >2GB msg size
-subcode: run_am
+subcode: run_am(src)
     $(set:t=buf_recv[0])
     $(set:fn=AM_table[buf_recv[1]])
-    $(set:src=status.MPI_SOURCE)
     $if $(t)<$(AM_MEDIUM_BASE)
         $call @on_am_recv, short
         $call @run_am_short
@@ -144,23 +170,31 @@ subcode: run_am
         len = buf_recv[2]
         $(if:debug)
             $print "[%d] am_medium-%d: $len bytes", $(node_this), $(t)
-        $my int msg_tag = buf_recv[3]
         b_need_free = 0
         $(if:1) # pack_medium
             tn_size = $(AM_ARG_START_MEDIUM)+$(t)-$(AM_MEDIUM_BASE)
             tn_len = ($(AM_BUF_MAX) - tn_size) * sizeof(int)
             $if len>=tn_len
-                s = (char*)malloc(len)
-                b_need_free = 1
-                $MPI Recv(s, len, MPI_BYTE, $(src), msg_tag, $(comm), &status)
+                $(if:put_medium)
+                    s = buf_recv_medium
+                $(else)
+                    # $print "[%d] receive medium payload %d bytes from %d", $(node_this), len, $(src)
+                    s = (char*)malloc(len)
+                    b_need_free = 1
+                    $my int msg_tag = buf_recv[3]
+                    $MPI Recv(s, len, MPI_BYTE, $(src), msg_tag, $(comm), MPI_STATUS_IGNORE)
             $else
                 s = (char*)(buf_recv + tn_size)
             
         $(else)
             $if len>0
-                s = (char*)malloc(len)
-                b_need_free = 1
-                $MPI Recv(s, len, MPI_BYTE, $(src), msg_tag, $(comm), &status)
+                $if len<$(AM_BUF_MEDIUM)
+                    s = buf_recv_medium
+                    b_need_free=0
+                $else
+                    s = (char*)malloc(len)
+                    b_need_free = 1
+                $MPI Recv(s, len, MPI_BYTE, $(src), msg_tag, $(comm), MPI_STATUS_IGNORE)
         NOOP
         $(if:INCOMING_THREADS)
             $call make_msg_medium
@@ -253,9 +287,13 @@ subcode: AM_short_(n, tgt, handler, @args)
     $local int buf_send[$(AM_BUF_MAX)]
     buf_send[0] = $(n)
     buf_send[1] = $(handler)
-    $call AM_copy_send, $(AM_ARG_START_SHORT) # 2
+    $call AM_copy_short, $(AM_ARG_START_SHORT) # 2
+    $call AM_send_short, tn_size
     $(if:debug)
         $print "%d->%d am_send short: id=%d", $(node_this), $(tgt), $(handler)
+
+macros:
+    put_medium: 1
 
 subcode: AM_medium_(n, tgt, handler, msg, len, @args)
     &call am_lock
@@ -266,23 +304,34 @@ subcode: AM_medium_(n, tgt, handler, msg, len, @args)
         buf_send[0] = $(n) + $(AM_MEDIUM_BASE)
         buf_send[1] = $(handler)
         buf_send[2] = $(len)
-        $my int msg_tag = $(AM_MSG_TAG)
-        $call @set_am_msg_tag # THREAD_MULTIPLE: embed thread id or atomic seq number
-        buf_send[3] = msg_tag
-        $(set:pack_medium=1)
-        $call AM_copy_send, $(AM_ARG_START_MEDIUM) # 4
+        $call AM_copy_short, $(AM_ARG_START_MEDIUM) # 4
+        $call AM_pack_medium
         $(if:debug)
-            $print "%d->%d am_send msg: %d bytes (tag=%x)", $(node_this), $(tgt), $(len), msg_tag
-        $if $(len)>0
-            $call am_send, $(msg), $(len), MPI_BYTE, $(tgt), msg_tag, $(comm)
+            $print "%d->%d am_send msg: %d bytes", $(node_this), $(tgt), $(len)
+        $if $(len) > 0
+            $(if:put_medium)
+                $print "%d -> %d: medium put %d bytes ...", $(node_this), $(tgt), $(len)
+                $MPI Win_lock(MPI_LOCK_SHARED, $(tgt), 0, win_medium)
+                $MPI Put($(msg), $(len), MPI_BYTE, $(tgt), (MPI_Aint)buf_recv_medium, $(len), MPI_BYTE, win_medium)
+                $MPI Win_unlock($(tgt), win_medium)
+                # buf_send[3] = 0
+                $call AM_send_short, tn_size
+            $(else)
+                $my int msg_tag = $(AM_MSG_TAG)
+                $call @set_am_msg_tag # THREAD_MULTIPLE: embed thread id or atomic seq number
+                buf_send[3] = msg_tag
+                $call AM_send_short, tn_size
+                $call am_send, $(msg), $(len), MPI_BYTE, $(tgt), msg_tag, $(comm)
+        $else
+            $call AM_send_short, tn_size
 
 subcode: AM_long_(n, tgt, handler, msg, len, dst, @args)
     &call am_lock
         $call @on_am_send, long
         $(if:AM_POLL=explicit)
             AMPoll()
-        $MPI Win_lock(MPI_LOCK_SHARED, $(tgt), 0, g_am_win)
         assert(g_am_win)
+        $MPI Win_lock(MPI_LOCK_SHARED, $(tgt), 0, g_am_win)
         $MPI Put($(msg), $(len), MPI_BYTE, $(tgt), (MPI_Aint)$(dst), $(len), MPI_BYTE, g_am_win)
         $MPI Win_unlock($(tgt), g_am_win)
 
@@ -291,33 +340,33 @@ subcode: AM_long_(n, tgt, handler, msg, len, dst, @args)
         buf_send[1] = $(handler)
         buf_send[2] = $(len)
         buf_send[3] = (int32_t)((uint64_t)$(dst) & 0xffffffff)
-        $call AM_copy_send, $(AM_ARG_START_MEDIUM) # 4
+        $call AM_copy_short, $(AM_ARG_START_MEDIUM) # 4
+        $call AM_send_short, tn_size
 
 # --
-subcode: AM_copy_send(i0)
+subcode: AM_copy_short(i0)
     $(if:n=n)
         $for i=0:n
             buf_send[$(i0)+i] = $(args)[i]
+        tn_size = $(i0)+n
     $(else)
         $(set:i=$(i0))
         $(for:a in $(args))
             buf_send[$(i)] = $(a)
             $(set-1:i+=1)
+        tn_size = $(i)
 
-    $(if:pack_medium)
-        $(if:n=n)
-            tn_size = $(i0)+n
-        $(else)
-            tn_size = $(i)
+subcode: AM_pack_medium
+    tn_len = ($(AM_BUF_MAX) - tn_size) * sizeof(int)
+    $if $(len)>0 && $(len)<tn_len
         ts_tmp = (char*) &buf_send[tn_size]
-        tn_len = ($(AM_BUF_MAX) - tn_size) * sizeof(int)
-        $if $(len)>0 && $(len)<tn_len
-            memcpy(ts_tmp, $(msg), $(len))
-            tn_size += ($(len)+sizeof(int)-1)/sizeof(int)
-            $(len) = 0
-        $call am_send, buf_send, tn_size, MPI_INT, $(tgt), $(AM_TAG), $(comm)
-    $(else)
-        $call am_send, buf_send, $(n)+$(i0), MPI_INT, $(tgt), $(AM_TAG), $(comm)
+        memcpy(ts_tmp, $(msg), $(len))
+        tn_size += ($(len)+sizeof(int)-1)/sizeof(int)
+        $(len) = 0
+
+subcode: AM_send_short(size)
+    # $print "AM_send_short %d bytes, %d ...", $(size), buf_send[0]
+    $call am_send, buf_send, $(size), MPI_INT, $(tgt), $(AM_TAG), $(comm)
 
 # ----
 fncode: AM_short_n(n, int tgt, int handler, const int* args)
@@ -391,6 +440,10 @@ subcode: am_init_win(size)
     g_am_bases = (void**)malloc(node_size * sizeof(void*))
     $MPI Allgather(&g_am_base, 8, MPI_BYTE, g_am_bases, 8, MPI_BYTE, $(comm))
 
+    # ------------------------------- 
+    $global MPI_Win win_medium, char *buf_recv_medium
+    $MPI Win_allocate($(AM_BUF_MEDIUM), 1, MPI_INFO_NULL, $(comm), &buf_recv_medium, &win_medium)
+
 subcode: am_finalize
     $call @on_am_finalize
     $(if:1) 
@@ -400,6 +453,8 @@ subcode: am_finalize
         $call block_on_request, req_final
 
     AMPoll_cancel()
+
+    $MPI Win_free(&win_medium)
 
     $if g_am_base
         $MPI Win_free(&g_am_win)
