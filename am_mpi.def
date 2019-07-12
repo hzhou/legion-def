@@ -26,6 +26,9 @@ subcode: _autoload
     extern int my_node_id;
 
 #---------------------------------------- 
+subcode: set_am_short_tag
+    short_tag = (thread_id<<10) + $(AM_TAG)
+
 subcode: set_am_msg_tag
     $(if:0)
         $include <atomic>
@@ -35,8 +38,11 @@ subcode: set_am_msg_tag
         $if msg_tag==10
             $print $$(node_this) msg_tag: $msg_tag
     $(else)
-        am_seq = (am_seq+1) & 0xff
-        msg_tag = (thread_id<<8) + am_seq
+        # 1. with two-sided medium, am_seq need distinguish $(AM_MULT_RECV)
+        # 2. with one-sided medium, am_seq need distinguish outstanding msgs --> impossible
+        am_seq = (am_seq+1) & 0x1f
+        # 5 bit src_vci + 5 bit dst_vci + 5 bit seq
+        msg_tag = (thread_id<<10) + am_seq
 
 subcode:: _autoload
     $include <thread>
@@ -102,11 +108,7 @@ fncode: AM_Init(int *p_node_this, int *p_node_size)
     $(if:debug)
         $print "network_init_mpi: %d/%d", *p_node_this, *p_node_size
 
-    $(if:0)
-        $global int tag_ub = 0
-        $my int flag =0
-        MPI_Comm_get_attr($(comm), MPI_TAG_UB, &tag_ub, &flag)
-        $print "tag UB: %x - $flag", tag_ub
+    $call @on_mpi_init
 
 fncode: AM_Init_segments(size_t size)
     $include <cstddef>

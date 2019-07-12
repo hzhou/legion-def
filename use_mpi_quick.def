@@ -55,9 +55,10 @@ page: mem_impl.cc, from templates/mem_impl.cc
             segbases[i] = (char *) g_am_bases[i]
     # --------------
     subcode: lock_epoch
-        $MPI Win_lock(MPI_LOCK_SHARED, $(target), 0, g_am_win)
+        # $MPI Win_lock(MPI_LOCK_SHARED, $(target), 0, g_am_win)
         BLOCK
-        $MPI Win_unlock($(target), g_am_win)
+        # $MPI Win_unlock($(target), g_am_win)
+        $MPI Win_flush($(target), g_am_win)
 
     subcode: mpi_get
         # assert(0 && "no remote get_bytes without GASNET");
@@ -78,9 +79,9 @@ page: mem_impl.cc, from templates/mem_impl.cc
             $MPI Put(src_c, chunk_size, MPI_BYTE, $(target), $(disp), chunk_size, MPI_BYTE, g_am_win)
     # --------------
     subcode: mpi_nbi_begin
-        $MPI Win_lock_all(0, g_am_win)
+        # $MPI Win_lock_all(0, g_am_win)
     subcode: mpi_nbi_end
-        $MPI Win_unlock_all(g_am_win)
+        # $MPI Win_unlock_all(g_am_win)
     subcode: mpi_nbi_put
         $(set:disp=(MPI_Aint)(blkid * memory_stride + blkoffset))
         $MPI Put(src_c, chunk_size, MPI_BYTE, node, $(disp), chunk_size, MPI_BYTE, g_am_win)

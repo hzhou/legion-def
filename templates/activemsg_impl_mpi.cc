@@ -24,7 +24,7 @@ protected:
     Realm::CoreReservation *core_rsrv;
     Realm::Thread *p_thread;
 
-    bool shutdown_flag;
+    std::atomic<bool> shutdown_flag;
 };
 
 AM_Manager g_am_manager;

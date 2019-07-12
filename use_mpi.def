@@ -126,6 +126,7 @@ subcode: _start_polling_threads
 
 subcode: _shutdown_polling_threads
     shutdown_flag = true;
+    AM_short_n(0, my_node_id, $(AM_NULL_HANDLER), NULL)
     p_thread->join();
     delete p_thread;
 
